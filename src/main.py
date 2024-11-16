@@ -14,8 +14,11 @@ from threading import Thread, Event
 import torch
 import librosa
 
-from .integration.pipeline import IntegrationPipeline, ProcessingResult
-from .decoder.text_decoder import WordScore
+from .integration.pipeline import (
+    IntegrationPipeline,
+    ProcessingResult,
+    NBestHypothesis
+)
 
 class TranscriptionResult(NamedTuple):
     """Container for transcription results"""
@@ -23,6 +26,7 @@ class TranscriptionResult(NamedTuple):
     confidence: Optional[float]
     timestamp: float
     word_scores: Optional[List[WordScore]] = None
+    n_best: Optional[List[NBestHypothesis]] = None
 
 class SemMomentSTT:
     def __init__(
@@ -31,7 +35,8 @@ class SemMomentSTT:
         language_model: str = "bert-base-uncased",
         semantic_dim: int = 768,
         device: Optional[str] = None,
-        sample_rate: int = 16000
+        sample_rate: int = 16000,
+        n_best: int = 5
     ):
         """
         Initialize the speech recognition system
@@ -42,12 +47,14 @@ class SemMomentSTT:
             semantic_dim: Dimensionality of semantic space
             device: Device to run on (cpu/cuda)
             sample_rate: Target audio sample rate in Hz
+            n_best: Number of hypotheses to maintain
         """
         self.pipeline = IntegrationPipeline(
             acoustic_model=model_name,
             language_model=language_model,
             semantic_dim=semantic_dim,
-            device=device
+            device=device,
+            n_best=n_best
         )
         self.sample_rate = sample_rate
         self._stop_recording = Event()
@@ -85,7 +92,8 @@ class SemMomentSTT:
         self,
         audio_path: Union[str, Path],
         chunk_duration: float = 0.5,
-        return_word_scores: bool = False
+        return_word_scores: bool = False,
+        return_n_best: bool = False
     ) -> Union[str, List[TranscriptionResult]]:
         """
         Transcribe an audio file
@@ -94,9 +102,10 @@ class SemMomentSTT:
             audio_path: Path to audio file
             chunk_duration: Duration of each audio chunk in seconds
             return_word_scores: Whether to return detailed word-level results
+            return_n_best: Whether to return N-best hypotheses
             
         Returns:
-            Transcribed text or list of TranscriptionResult with word scores
+            Transcribed text or list of TranscriptionResult with details
         """
         # Load audio file
         audio, file_sample_rate = self._load_audio(audio_path)
@@ -128,10 +137,11 @@ class SemMomentSTT:
                     text=result.decoding_result.text,
                     confidence=result.decoding_result.confidence,
                     timestamp=result.decoding_result.word_scores[0].start_time,
-                    word_scores=result.decoding_result.word_scores
+                    word_scores=result.decoding_result.word_scores if return_word_scores else None,
+                    n_best=result.n_best if return_n_best else None
                 ))
         
-        if return_word_scores:
+        if return_word_scores or return_n_best:
             return results
         else:
             # Join text with spaces, filtering None values
@@ -141,7 +151,8 @@ class SemMomentSTT:
         self,
         audio_stream: Generator[np.ndarray, None, None],
         stream_sample_rate: Optional[int] = None,
-        chunk_duration: Optional[float] = None
+        chunk_duration: Optional[float] = None,
+        return_n_best: bool = False
     ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe a stream of audio data
@@ -150,6 +161,7 @@ class SemMomentSTT:
             audio_stream: Generator yielding audio frames
             stream_sample_rate: Sample rate of the audio stream
             chunk_duration: Duration of each chunk in seconds
+            return_n_best: Whether to return N-best hypotheses
             
         Yields:
             TranscriptionResult for each processed chunk
@@ -166,14 +178,16 @@ class SemMomentSTT:
                     text=result.decoding_result.text,
                     confidence=result.decoding_result.confidence,
                     timestamp=result.decoding_result.word_scores[0].start_time,
-                    word_scores=result.decoding_result.word_scores
+                    word_scores=result.decoding_result.word_scores,
+                    n_best=result.n_best if return_n_best else None
                 )
     
     def transcribe_microphone(
         self,
         device: Optional[int] = None,
         chunk_duration: float = 0.5,
-        input_sample_rate: Optional[int] = None
+        input_sample_rate: Optional[int] = None,
+        return_n_best: bool = False
     ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe audio from microphone in real-time
@@ -182,6 +196,7 @@ class SemMomentSTT:
             device: Audio input device ID (None for default)
             chunk_duration: Duration of each audio chunk in seconds
             input_sample_rate: Sample rate to use for input (None for device default)
+            return_n_best: Whether to return N-best hypotheses
             
         Yields:
             TranscriptionResult as text becomes available
@@ -234,7 +249,8 @@ class SemMomentSTT:
                             text=result.decoding_result.text,
                             confidence=result.decoding_result.confidence,
                             timestamp=result.decoding_result.word_scores[0].start_time,
-                            word_scores=result.decoding_result.word_scores
+                            word_scores=result.decoding_result.word_scores,
+                            n_best=result.n_best if return_n_best else None
                         )
                         
             except KeyboardInterrupt:
