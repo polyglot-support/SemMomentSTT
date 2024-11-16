@@ -2,9 +2,9 @@
 Basic usage examples for SemMomentSTT
 
 This script demonstrates the core functionality of the SemMomentSTT system:
-1. File transcription with various formats and sample rates
-2. Microphone input with device configuration
-3. Custom audio streaming
+1. File transcription with timestamps and confidence scores
+2. Real-time microphone transcription
+3. Custom audio streaming with text output
 """
 
 import numpy as np
@@ -12,15 +12,14 @@ from pathlib import Path
 import soundfile as sf
 from src.main import SemMomentSTT
 
-def print_trajectory(trajectory, prefix=""):
-    """Helper function to print trajectory information"""
-    print(f"{prefix}Position norm: {np.linalg.norm(trajectory.position):.3f}")
-    print(f"{prefix}Confidence: {trajectory.confidence:.3f}")
-    print(f"{prefix}State: {trajectory.state.value}")
-    print()
+def format_time(seconds: float) -> str:
+    """Format time in seconds to MM:SS.mmm"""
+    minutes = int(seconds // 60)
+    seconds = seconds % 60
+    return f"{minutes:02d}:{seconds:06.3f}"
 
 def example_file_transcription():
-    """Demonstrate file transcription with different formats"""
+    """Demonstrate file transcription with timestamps"""
     print("\n=== File Transcription Example ===")
     
     stt = SemMomentSTT()
@@ -43,17 +42,28 @@ def example_file_transcription():
         
         print(f"\nProcessing: {audio_path} ({sample_rate}Hz)")
         try:
-            trajectories = stt.transcribe_file(audio_path)
-            print(f"Processed {len(trajectories)} segments")
-            for i, trajectory in enumerate(trajectories[:3]):  # Show first 3
-                print(f"\nSegment {i + 1}:")
-                print_trajectory(trajectory, "  ")
+            # Get detailed transcription with timestamps
+            results = stt.transcribe_file(
+                audio_path,
+                return_timestamps=True
+            )
+            
+            print("\nDetailed transcription:")
+            for result in results:
+                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
+                print(f"[{format_time(result.timestamp)}] "
+                      f"({confidence_str}) {result.text}")
+            
+            # Get simple transcription
+            text = stt.transcribe_file(audio_path)
+            print(f"\nFull text: {text}")
+            
         except Exception as e:
             print(f"Error processing {audio_path}: {str(e)}")
 
 def example_microphone_input():
-    """Demonstrate microphone input with device configuration"""
-    print("\n=== Microphone Input Example ===")
+    """Demonstrate real-time microphone transcription"""
+    print("\n=== Microphone Transcription Example ===")
     
     stt = SemMomentSTT()
     
@@ -73,16 +83,19 @@ def example_microphone_input():
         print("Speak into your microphone (Ctrl+C to stop)")
         
         try:
-            for trajectory in stt.transcribe_microphone(**config):
-                print("\nProcessed segment:")
-                print_trajectory(trajectory, "  ")
+            for result in stt.transcribe_microphone(**config):
+                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
+                print(f"[{format_time(result.timestamp)}] "
+                      f"({confidence_str}) {result.text}")
         except KeyboardInterrupt:
             print("\nStopped microphone transcription")
         except Exception as e:
             print(f"Error with device config {config}: {str(e)}")
+        finally:
+            stt.reset()  # Reset system state between configurations
 
 def example_custom_stream():
-    """Demonstrate custom audio streaming with different sample rates"""
+    """Demonstrate custom audio streaming with text output"""
     print("\n=== Custom Stream Example ===")
     
     def create_audio_stream(sample_rate, duration=5.0, chunk_duration=0.5):
@@ -105,11 +118,14 @@ def example_custom_stream():
         stream = create_audio_stream(rate)
         
         try:
-            for trajectory in stt.transcribe_stream(stream, stream_sample_rate=rate):
-                print("\nProcessed segment:")
-                print_trajectory(trajectory, "  ")
+            for result in stt.transcribe_stream(stream, stream_sample_rate=rate):
+                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
+                print(f"[{format_time(result.timestamp)}] "
+                      f"({confidence_str}) {result.text}")
         except Exception as e:
             print(f"Error processing {rate}Hz stream: {str(e)}")
+        finally:
+            stt.reset()  # Reset system state between sample rates
 
 def main():
     """Run all examples"""

@@ -5,7 +5,7 @@ This script demonstrates the semantic momentum tracking system by visualizing:
 1. Trajectory positions in reduced dimensional space
 2. Confidence scores over time
 3. Force field effects
-4. Sample rate handling
+4. Real-time text transcription
 """
 
 import numpy as np
@@ -37,7 +37,7 @@ class TrajectoryVisualizer:
         
         # Setup the plot
         plt.style.use('dark_background')
-        self.fig = plt.figure(figsize=(15, 10))
+        self.fig = plt.figure(figsize=(15, 12))
         self.setup_subplots()
         
         # Initialize data storage
@@ -45,6 +45,7 @@ class TrajectoryVisualizer:
         self.confidences = []
         self.forces = []
         self.times = []
+        self.texts = []
         self.current_time = 0
         
         # Plot objects
@@ -71,12 +72,17 @@ class TrajectoryVisualizer:
         self.ax_force.grid(True, alpha=0.3)
         
         # Confidence plot
-        self.ax_conf = self.fig.add_subplot(212)
+        self.ax_conf = self.fig.add_subplot(223)
         self.ax_conf.set_title('Trajectory Confidences')
         self.ax_conf.set_xlabel('Time (s)')
         self.ax_conf.set_ylabel('Confidence')
         self.ax_conf.set_ylim(0, 1)
         self.ax_conf.grid(True, alpha=0.3)
+        
+        # Text output plot
+        self.ax_text = self.fig.add_subplot(224)
+        self.ax_text.set_title('Transcribed Text')
+        self.ax_text.axis('off')
     
     def _update_plot(self, frame):
         """Update the visualization"""
@@ -86,31 +92,38 @@ class TrajectoryVisualizer:
         audio_frame = np.random.randn(samples).astype(np.float32) * 0.1
         
         # Process frame
-        trajectory = self.stt.pipeline.process_frame(
+        result = self.stt.pipeline.process_frame(
             audio_frame,
             orig_sr=self.sample_rate
         )
         
-        if trajectory is not None:
+        if result.trajectory is not None:
             # Update positions
-            self.positions.append(trajectory.position)
+            self.positions.append(result.trajectory.position)
             if len(self.positions) > self.history_length:
                 self.positions.pop(0)
             
             # Update forces
             force = self.stt.pipeline.momentum_tracker.compute_force_field(
-                trajectory.position
+                result.trajectory.position
             )
             self.forces.append(force)
             if len(self.forces) > self.history_length:
                 self.forces.pop(0)
             
             # Update confidences
-            self.confidences.append(trajectory.confidence)
+            self.confidences.append(result.trajectory.confidence)
             self.times.append(self.current_time * duration)
             if len(self.confidences) > self.history_length:
                 self.confidences.pop(0)
                 self.times.pop(0)
+            
+            # Update text
+            if result.text is not None:
+                self.texts.append(f"[{self.current_time * duration:.1f}s] "
+                                f"({result.confidence*100:.1f}%) {result.text}")
+                if len(self.texts) > 10:  # Keep last 10 text segments
+                    self.texts.pop(0)
             
             # Update trajectory plot
             positions_array = np.array(self.positions)
@@ -170,6 +183,18 @@ class TrajectoryVisualizer:
                 self.ax_conf.set_ylim(0, 1)
                 self.ax_conf.grid(True, alpha=0.3)
                 self.ax_conf.plot(self.times, self.confidences, 'g-', alpha=0.8)
+                
+                # Update text display
+                self.ax_text.clear()
+                self.ax_text.set_title('Transcribed Text')
+                self.ax_text.axis('off')
+                text_content = "\n".join(self.texts)
+                self.ax_text.text(
+                    0.05, 0.95, text_content,
+                    fontsize=10, family='monospace',
+                    verticalalignment='top',
+                    transform=self.ax_text.transAxes
+                )
             
             self.current_time += 1
     
