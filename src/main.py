@@ -8,19 +8,25 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from pathlib import Path
-from typing import Optional, Generator, Union, List, Tuple
+from typing import Optional, Generator, Union, List, Tuple, NamedTuple
 from queue import Queue
 from threading import Thread, Event
 import torch
 import librosa
 
-from .integration.pipeline import IntegrationPipeline
-from .semantic.momentum_tracker import SemanticTrajectory
+from .integration.pipeline import IntegrationPipeline, ProcessingResult
+
+class TranscriptionResult(NamedTuple):
+    """Container for transcription results"""
+    text: Optional[str]
+    confidence: Optional[float]
+    timestamp: float
 
 class SemMomentSTT:
     def __init__(
         self,
         model_name: str = "facebook/wav2vec2-base",
+        language_model: str = "bert-base-uncased",
         semantic_dim: int = 768,
         device: Optional[str] = None,
         sample_rate: int = 16000
@@ -30,12 +36,14 @@ class SemMomentSTT:
         
         Args:
             model_name: Name of the acoustic model to use
+            language_model: Name of the language model for decoding
             semantic_dim: Dimensionality of semantic space
             device: Device to run on (cpu/cuda)
             sample_rate: Target audio sample rate in Hz
         """
         self.pipeline = IntegrationPipeline(
             acoustic_model=model_name,
+            language_model=language_model,
             semantic_dim=semantic_dim,
             device=device
         )
@@ -74,24 +82,27 @@ class SemMomentSTT:
     def transcribe_file(
         self,
         audio_path: Union[str, Path],
-        chunk_duration: float = 0.5
-    ) -> List[SemanticTrajectory]:
+        chunk_duration: float = 0.5,
+        return_timestamps: bool = False
+    ) -> Union[str, List[TranscriptionResult]]:
         """
         Transcribe an audio file
         
         Args:
             audio_path: Path to audio file
             chunk_duration: Duration of each audio chunk in seconds
+            return_timestamps: Whether to return detailed results with timestamps
             
         Returns:
-            List of semantic trajectories
+            Transcribed text or list of TranscriptionResult
         """
         # Load audio file
         audio, file_sample_rate = self._load_audio(audio_path)
         
         # Process in chunks
         chunk_size = int(file_sample_rate * chunk_duration)
-        trajectories = []
+        results = []
+        current_time = 0.0
         
         for i in range(0, len(audio), chunk_size):
             chunk = audio[i:i + chunk_size]
@@ -105,21 +116,31 @@ class SemMomentSTT:
                 )
             
             # Process chunk with original sample rate
-            trajectory = self.pipeline.process_frame(
+            result = self.pipeline.process_frame(
                 chunk,
                 orig_sr=file_sample_rate
             )
             
-            if trajectory is not None:
-                trajectories.append(trajectory)
+            if result.text is not None:
+                results.append(TranscriptionResult(
+                    text=result.text,
+                    confidence=result.confidence,
+                    timestamp=current_time
+                ))
+            
+            current_time += chunk_duration
         
-        return trajectories
+        if return_timestamps:
+            return results
+        else:
+            # Join text with spaces, filtering None values
+            return " ".join(r.text for r in results if r.text is not None)
     
     def transcribe_stream(
         self,
         audio_stream: Generator[np.ndarray, None, None],
         stream_sample_rate: Optional[int] = None
-    ) -> Generator[SemanticTrajectory, None, None]:
+    ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe a stream of audio data
         
@@ -128,22 +149,32 @@ class SemMomentSTT:
             stream_sample_rate: Sample rate of the audio stream
             
         Yields:
-            Semantic trajectories as they become available
+            TranscriptionResult for each processed chunk
         """
+        current_time = 0.0
+        chunk_duration = 0.5  # Default chunk duration
+        
         for audio_frame in audio_stream:
-            trajectory = self.pipeline.process_frame(
+            result = self.pipeline.process_frame(
                 audio_frame,
                 orig_sr=stream_sample_rate
             )
-            if trajectory is not None:
-                yield trajectory
+            
+            if result.text is not None:
+                yield TranscriptionResult(
+                    text=result.text,
+                    confidence=result.confidence,
+                    timestamp=current_time
+                )
+            
+            current_time += chunk_duration
     
     def transcribe_microphone(
         self,
         device: Optional[int] = None,
         chunk_duration: float = 0.5,
         input_sample_rate: Optional[int] = None
-    ) -> Generator[SemanticTrajectory, None, None]:
+    ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe audio from microphone in real-time
         
@@ -153,7 +184,7 @@ class SemMomentSTT:
             input_sample_rate: Sample rate to use for input (None for device default)
             
         Yields:
-            Semantic trajectories as they become available
+            TranscriptionResult as text becomes available
         """
         # Get device info
         if device is not None:
@@ -168,6 +199,7 @@ class SemMomentSTT:
         
         audio_queue = Queue()
         self._stop_recording.clear()
+        current_time = 0.0
         
         def audio_callback(indata, frames, time, status):
             """Callback for audio input"""
@@ -192,13 +224,19 @@ class SemMomentSTT:
                     audio_chunk = audio_queue.get()
                     
                     # Process audio chunk
-                    trajectory = self.pipeline.process_frame(
+                    result = self.pipeline.process_frame(
                         audio_chunk.flatten(),
                         orig_sr=stream_sr
                     )
                     
-                    if trajectory is not None:
-                        yield trajectory
+                    if result.text is not None:
+                        yield TranscriptionResult(
+                            text=result.text,
+                            confidence=result.confidence,
+                            timestamp=current_time
+                        )
+                    
+                    current_time += chunk_duration
                         
             except KeyboardInterrupt:
                 print("\nStopping...")
@@ -208,6 +246,10 @@ class SemMomentSTT:
     def stop_microphone(self):
         """Stop microphone transcription"""
         self._stop_recording.set()
+    
+    def reset(self):
+        """Reset the system state"""
+        self.pipeline.reset()
     
     @staticmethod
     def list_audio_devices() -> None:
