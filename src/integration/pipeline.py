@@ -5,20 +5,30 @@ This module handles the integration between acoustic and semantic components:
 - Acoustic-semantic mapping
 - Context integration
 - Pipeline coordination
+- Text decoding
 """
 
-from typing import Optional, List, Generator
+from typing import Optional, List, Generator, Tuple, NamedTuple
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from ..acoustic.processor import AcousticProcessor, AcousticFeatures
 from ..semantic.momentum_tracker import MomentumTracker, SemanticTrajectory
+from ..decoder.text_decoder import TextDecoder
+
+class ProcessingResult(NamedTuple):
+    """Container for processing results"""
+    trajectory: Optional[SemanticTrajectory]
+    text: Optional[str]
+    confidence: Optional[float]
+    features: Optional[AcousticFeatures] = None
 
 class IntegrationPipeline:
     def __init__(
         self,
         acoustic_model: str = "facebook/wav2vec2-base",
+        language_model: str = "bert-base-uncased",
         semantic_dim: int = 768,
         context_window: int = 10,
         device: Optional[str] = None,
@@ -29,6 +39,7 @@ class IntegrationPipeline:
         
         Args:
             acoustic_model: Name of the acoustic model to use
+            language_model: Name of the language model for decoding
             semantic_dim: Dimensionality of semantic space
             context_window: Size of context window in frames
             device: Device to run models on
@@ -49,6 +60,11 @@ class IntegrationPipeline:
             max_trajectories=max_trajectories
         )
         
+        self.text_decoder = TextDecoder(
+            model_name=language_model,
+            device=self.device
+        )
+        
         # Context buffer
         self.context_buffer: List[AcousticFeatures] = []
         
@@ -61,20 +77,25 @@ class IntegrationPipeline:
     def process_frame(
         self,
         audio_frame: np.ndarray,
+        orig_sr: Optional[int] = None,
         return_features: bool = False
-    ) -> Optional[SemanticTrajectory]:
+    ) -> ProcessingResult:
         """
         Process a single frame of audio through the full pipeline
         
         Args:
             audio_frame: Raw audio frame data
+            orig_sr: Original sample rate if different from target
             return_features: Whether to return acoustic features
             
         Returns:
-            Best current trajectory if available
+            ProcessingResult containing trajectory and decoded text
         """
         # Extract acoustic features
-        acoustic_features = self.acoustic_processor.process_frame(audio_frame)
+        acoustic_features = self.acoustic_processor.process_frame(
+            audio_frame,
+            orig_sr=orig_sr
+        )
         
         # Update context
         self._update_context(acoustic_features)
@@ -92,27 +113,38 @@ class IntegrationPipeline:
         self.momentum_tracker.merge_similar_trajectories()
         self.momentum_tracker.prune_trajectories()
         
-        if return_features:
-            return self.momentum_tracker.get_best_trajectory(), acoustic_features
-        return self.momentum_tracker.get_best_trajectory()
+        # Get best trajectory
+        trajectory = self.momentum_tracker.get_best_trajectory()
+        
+        # Decode text if trajectory exists
+        text = None
+        confidence = None
+        if trajectory is not None:
+            result = self.text_decoder.decode_trajectory(trajectory)
+            if result is not None:
+                text, confidence = result
+        
+        features = acoustic_features if return_features else None
+        return ProcessingResult(trajectory, text, confidence, features)
     
     def process_stream(
         self,
-        audio_stream: Generator[np.ndarray, None, None]
-    ) -> Generator[SemanticTrajectory, None, None]:
+        audio_stream: Generator[np.ndarray, None, None],
+        stream_sr: Optional[int] = None
+    ) -> Generator[ProcessingResult, None, None]:
         """
         Process a stream of audio frames
         
         Args:
             audio_stream: Generator yielding audio frames
+            stream_sr: Sample rate of the audio stream
             
         Yields:
-            Best trajectory for each processed frame
+            ProcessingResult for each processed frame
         """
         for audio_frame in audio_stream:
-            trajectory = self.process_frame(audio_frame)
-            if trajectory is not None:
-                yield trajectory
+            result = self.process_frame(audio_frame, orig_sr=stream_sr)
+            yield result
     
     def _update_context(self, features: AcousticFeatures):
         """
@@ -180,3 +212,9 @@ class IntegrationPipeline:
         )
         
         return weighted_sum.cpu().numpy()
+    
+    def reset(self):
+        """Reset the pipeline state"""
+        self.context_buffer.clear()
+        self.text_decoder.reset_context()
+        # Note: momentum tracker state persists intentionally
