@@ -15,12 +15,14 @@ import torch
 import librosa
 
 from .integration.pipeline import IntegrationPipeline, ProcessingResult
+from .decoder.text_decoder import WordScore
 
 class TranscriptionResult(NamedTuple):
     """Container for transcription results"""
     text: Optional[str]
     confidence: Optional[float]
     timestamp: float
+    word_scores: Optional[List[WordScore]] = None
 
 class SemMomentSTT:
     def __init__(
@@ -83,7 +85,7 @@ class SemMomentSTT:
         self,
         audio_path: Union[str, Path],
         chunk_duration: float = 0.5,
-        return_timestamps: bool = False
+        return_word_scores: bool = False
     ) -> Union[str, List[TranscriptionResult]]:
         """
         Transcribe an audio file
@@ -91,10 +93,10 @@ class SemMomentSTT:
         Args:
             audio_path: Path to audio file
             chunk_duration: Duration of each audio chunk in seconds
-            return_timestamps: Whether to return detailed results with timestamps
+            return_word_scores: Whether to return detailed word-level results
             
         Returns:
-            Transcribed text or list of TranscriptionResult
+            Transcribed text or list of TranscriptionResult with word scores
         """
         # Load audio file
         audio, file_sample_rate = self._load_audio(audio_path)
@@ -102,7 +104,6 @@ class SemMomentSTT:
         # Process in chunks
         chunk_size = int(file_sample_rate * chunk_duration)
         results = []
-        current_time = 0.0
         
         for i in range(0, len(audio), chunk_size):
             chunk = audio[i:i + chunk_size]
@@ -118,19 +119,19 @@ class SemMomentSTT:
             # Process chunk with original sample rate
             result = self.pipeline.process_frame(
                 chunk,
-                orig_sr=file_sample_rate
+                orig_sr=file_sample_rate,
+                frame_duration=chunk_duration
             )
             
-            if result.text is not None:
+            if result.decoding_result is not None:
                 results.append(TranscriptionResult(
-                    text=result.text,
-                    confidence=result.confidence,
-                    timestamp=current_time
+                    text=result.decoding_result.text,
+                    confidence=result.decoding_result.confidence,
+                    timestamp=result.decoding_result.word_scores[0].start_time,
+                    word_scores=result.decoding_result.word_scores
                 ))
-            
-            current_time += chunk_duration
         
-        if return_timestamps:
+        if return_word_scores:
             return results
         else:
             # Join text with spaces, filtering None values
@@ -139,7 +140,8 @@ class SemMomentSTT:
     def transcribe_stream(
         self,
         audio_stream: Generator[np.ndarray, None, None],
-        stream_sample_rate: Optional[int] = None
+        stream_sample_rate: Optional[int] = None,
+        chunk_duration: Optional[float] = None
     ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe a stream of audio data
@@ -147,27 +149,25 @@ class SemMomentSTT:
         Args:
             audio_stream: Generator yielding audio frames
             stream_sample_rate: Sample rate of the audio stream
+            chunk_duration: Duration of each chunk in seconds
             
         Yields:
             TranscriptionResult for each processed chunk
         """
-        current_time = 0.0
-        chunk_duration = 0.5  # Default chunk duration
-        
         for audio_frame in audio_stream:
             result = self.pipeline.process_frame(
                 audio_frame,
-                orig_sr=stream_sample_rate
+                orig_sr=stream_sample_rate,
+                frame_duration=chunk_duration
             )
             
-            if result.text is not None:
+            if result.decoding_result is not None:
                 yield TranscriptionResult(
-                    text=result.text,
-                    confidence=result.confidence,
-                    timestamp=current_time
+                    text=result.decoding_result.text,
+                    confidence=result.decoding_result.confidence,
+                    timestamp=result.decoding_result.word_scores[0].start_time,
+                    word_scores=result.decoding_result.word_scores
                 )
-            
-            current_time += chunk_duration
     
     def transcribe_microphone(
         self,
@@ -199,7 +199,6 @@ class SemMomentSTT:
         
         audio_queue = Queue()
         self._stop_recording.clear()
-        current_time = 0.0
         
         def audio_callback(indata, frames, time, status):
             """Callback for audio input"""
@@ -226,22 +225,37 @@ class SemMomentSTT:
                     # Process audio chunk
                     result = self.pipeline.process_frame(
                         audio_chunk.flatten(),
-                        orig_sr=stream_sr
+                        orig_sr=stream_sr,
+                        frame_duration=chunk_duration
                     )
                     
-                    if result.text is not None:
+                    if result.decoding_result is not None:
                         yield TranscriptionResult(
-                            text=result.text,
-                            confidence=result.confidence,
-                            timestamp=current_time
+                            text=result.decoding_result.text,
+                            confidence=result.decoding_result.confidence,
+                            timestamp=result.decoding_result.word_scores[0].start_time,
+                            word_scores=result.decoding_result.word_scores
                         )
-                    
-                    current_time += chunk_duration
                         
             except KeyboardInterrupt:
                 print("\nStopping...")
             finally:
                 self._stop_recording.set()
+    
+    def get_word_history(
+        self,
+        time_window: Optional[float] = None
+    ) -> List[WordScore]:
+        """
+        Get word history with optional time window
+        
+        Args:
+            time_window: Optional time window in seconds
+            
+        Returns:
+            List of word scores with timing information
+        """
+        return self.pipeline.get_word_history(time_window)
     
     def stop_microphone(self):
         """Stop microphone transcription"""
