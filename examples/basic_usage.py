@@ -2,9 +2,9 @@
 Basic usage examples for SemMomentSTT
 
 This script demonstrates the core functionality of the SemMomentSTT system:
-1. File transcription with timestamps and confidence scores
-2. Real-time microphone transcription
-3. Custom audio streaming with text output
+1. File transcription with word-level confidence scores
+2. Real-time microphone transcription with detailed word timing
+3. Custom audio streaming with word-level analysis
 """
 
 import numpy as np
@@ -18,8 +18,17 @@ def format_time(seconds: float) -> str:
     seconds = seconds % 60
     return f"{minutes:02d}:{seconds:06.3f}"
 
+def format_word_score(word_score) -> str:
+    """Format word score information"""
+    return (
+        f"{word_score.word:<15} "
+        f"Conf: {word_score.confidence*100:4.1f}% "
+        f"(Sem: {word_score.semantic_similarity*100:4.1f}%, "
+        f"LM: {word_score.language_model_score*100:4.1f}%)"
+    )
+
 def example_file_transcription():
-    """Demonstrate file transcription with timestamps"""
+    """Demonstrate file transcription with word-level analysis"""
     print("\n=== File Transcription Example ===")
     
     stt = SemMomentSTT()
@@ -42,27 +51,36 @@ def example_file_transcription():
         
         print(f"\nProcessing: {audio_path} ({sample_rate}Hz)")
         try:
-            # Get detailed transcription with timestamps
+            # Get detailed transcription with word scores
             results = stt.transcribe_file(
                 audio_path,
-                return_timestamps=True
+                return_word_scores=True
             )
             
             print("\nDetailed transcription:")
             for result in results:
-                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
-                print(f"[{format_time(result.timestamp)}] "
-                      f"({confidence_str}) {result.text}")
+                print(f"\n[{format_time(result.timestamp)}] "
+                      f"Overall confidence: {result.confidence*100:.1f}%")
+                
+                for word_score in result.word_scores:
+                    print(f"  {format_word_score(word_score)}")
             
             # Get simple transcription
             text = stt.transcribe_file(audio_path)
             print(f"\nFull text: {text}")
             
+            # Get word history for the last second
+            recent_words = stt.get_word_history(time_window=1.0)
+            print("\nRecent word history (last 1 second):")
+            for word_score in recent_words:
+                print(f"  [{format_time(word_score.start_time)}] "
+                      f"{format_word_score(word_score)}")
+            
         except Exception as e:
             print(f"Error processing {audio_path}: {str(e)}")
 
 def example_microphone_input():
-    """Demonstrate real-time microphone transcription"""
+    """Demonstrate real-time microphone transcription with word analysis"""
     print("\n=== Microphone Transcription Example ===")
     
     stt = SemMomentSTT()
@@ -84,9 +102,11 @@ def example_microphone_input():
         
         try:
             for result in stt.transcribe_microphone(**config):
-                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
-                print(f"[{format_time(result.timestamp)}] "
-                      f"({confidence_str}) {result.text}")
+                print(f"\n[{format_time(result.timestamp)}] "
+                      f"Overall confidence: {result.confidence*100:.1f}%")
+                
+                for word_score in result.word_scores:
+                    print(f"  {format_word_score(word_score)}")
         except KeyboardInterrupt:
             print("\nStopped microphone transcription")
         except Exception as e:
@@ -95,7 +115,7 @@ def example_microphone_input():
             stt.reset()  # Reset system state between configurations
 
 def example_custom_stream():
-    """Demonstrate custom audio streaming with text output"""
+    """Demonstrate custom audio streaming with word-level analysis"""
     print("\n=== Custom Stream Example ===")
     
     def create_audio_stream(sample_rate, duration=5.0, chunk_duration=0.5):
@@ -118,10 +138,25 @@ def example_custom_stream():
         stream = create_audio_stream(rate)
         
         try:
-            for result in stt.transcribe_stream(stream, stream_sample_rate=rate):
-                confidence_str = f"{result.confidence*100:.1f}%" if result.confidence else "N/A"
-                print(f"[{format_time(result.timestamp)}] "
-                      f"({confidence_str}) {result.text}")
+            for result in stt.transcribe_stream(
+                stream,
+                stream_sample_rate=rate,
+                chunk_duration=0.5
+            ):
+                print(f"\n[{format_time(result.timestamp)}] "
+                      f"Overall confidence: {result.confidence*100:.1f}%")
+                
+                for word_score in result.word_scores:
+                    print(f"  {format_word_score(word_score)}")
+                    
+                # Show semantic similarity vs language model contribution
+                word = word_score.word
+                sem_conf = word_score.semantic_similarity
+                lm_conf = word_score.language_model_score
+                print(f"  Analysis for '{word}':")
+                print(f"    Semantic: {'='*int(sem_conf*40):40s} {sem_conf*100:4.1f}%")
+                print(f"    Language: {'='*int(lm_conf*40):40s} {lm_conf*100:4.1f}%")
+                
         except Exception as e:
             print(f"Error processing {rate}Hz stream: {str(e)}")
         finally:

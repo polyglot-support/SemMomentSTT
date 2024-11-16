@@ -5,7 +5,7 @@ This script demonstrates the semantic momentum tracking system by visualizing:
 1. Trajectory positions in reduced dimensional space
 2. Confidence scores over time
 3. Force field effects
-4. Real-time text transcription
+4. Word-level confidence analysis
 """
 
 import numpy as np
@@ -45,7 +45,7 @@ class TrajectoryVisualizer:
         self.confidences = []
         self.forces = []
         self.times = []
-        self.texts = []
+        self.word_history = []
         self.current_time = 0
         
         # Plot objects
@@ -57,32 +57,32 @@ class TrajectoryVisualizer:
     
     def setup_subplots(self):
         """Setup the visualization subplots"""
-        # Trajectory plot
+        # Trajectory plot (top left)
         self.ax_traj = self.fig.add_subplot(221)
         self.ax_traj.set_title('Semantic Space Trajectories (PCA)')
         self.ax_traj.set_xlabel('First Principal Component')
         self.ax_traj.set_ylabel('Second Principal Component')
         self.ax_traj.grid(True, alpha=0.3)
         
-        # Force field plot
+        # Force field plot (top right)
         self.ax_force = self.fig.add_subplot(222)
         self.ax_force.set_title('Semantic Force Field')
         self.ax_force.set_xlabel('First Principal Component')
         self.ax_force.set_ylabel('Second Principal Component')
         self.ax_force.grid(True, alpha=0.3)
         
-        # Confidence plot
+        # Confidence plot (bottom left)
         self.ax_conf = self.fig.add_subplot(223)
-        self.ax_conf.set_title('Trajectory Confidences')
+        self.ax_conf.set_title('Confidence Scores')
         self.ax_conf.set_xlabel('Time (s)')
         self.ax_conf.set_ylabel('Confidence')
         self.ax_conf.set_ylim(0, 1)
         self.ax_conf.grid(True, alpha=0.3)
         
-        # Text output plot
-        self.ax_text = self.fig.add_subplot(224)
-        self.ax_text.set_title('Transcribed Text')
-        self.ax_text.axis('off')
+        # Word analysis plot (bottom right)
+        self.ax_word = self.fig.add_subplot(224)
+        self.ax_word.set_title('Word-Level Analysis')
+        self.ax_word.axis('off')
     
     def _update_plot(self, frame):
         """Update the visualization"""
@@ -94,7 +94,8 @@ class TrajectoryVisualizer:
         # Process frame
         result = self.stt.pipeline.process_frame(
             audio_frame,
-            orig_sr=self.sample_rate
+            orig_sr=self.sample_rate,
+            frame_duration=duration
         )
         
         if result.trajectory is not None:
@@ -118,12 +119,12 @@ class TrajectoryVisualizer:
                 self.confidences.pop(0)
                 self.times.pop(0)
             
-            # Update text
-            if result.text is not None:
-                self.texts.append(f"[{self.current_time * duration:.1f}s] "
-                                f"({result.confidence*100:.1f}%) {result.text}")
-                if len(self.texts) > 10:  # Keep last 10 text segments
-                    self.texts.pop(0)
+            # Update word history
+            if result.decoding_result is not None:
+                word_score = result.decoding_result.word_scores[0]
+                self.word_history.append(word_score)
+                if len(self.word_history) > 10:  # Keep last 10 words
+                    self.word_history.pop(0)
             
             # Update trajectory plot
             positions_array = np.array(self.positions)
@@ -177,23 +178,48 @@ class TrajectoryVisualizer:
                 
                 # Update confidence plot
                 self.ax_conf.clear()
-                self.ax_conf.set_title('Trajectory Confidences')
+                self.ax_conf.set_title('Confidence Scores')
                 self.ax_conf.set_xlabel('Time (s)')
                 self.ax_conf.set_ylabel('Confidence')
                 self.ax_conf.set_ylim(0, 1)
                 self.ax_conf.grid(True, alpha=0.3)
-                self.ax_conf.plot(self.times, self.confidences, 'g-', alpha=0.8)
                 
-                # Update text display
-                self.ax_text.clear()
-                self.ax_text.set_title('Transcribed Text')
-                self.ax_text.axis('off')
-                text_content = "\n".join(self.texts)
-                self.ax_text.text(
-                    0.05, 0.95, text_content,
-                    fontsize=10, family='monospace',
+                # Plot overall confidence
+                self.ax_conf.plot(self.times, self.confidences, 'g-', alpha=0.8, label='Overall')
+                
+                # Plot word-level confidences if available
+                if self.word_history:
+                    word_times = [w.start_time for w in self.word_history]
+                    word_confs = [w.confidence for w in self.word_history]
+                    self.ax_conf.scatter(word_times, word_confs, c='y', alpha=0.6, label='Words')
+                
+                self.ax_conf.legend()
+                
+                # Update word analysis plot
+                self.ax_word.clear()
+                self.ax_word.set_title('Word-Level Analysis')
+                self.ax_word.axis('off')
+                
+                # Display word history with confidence breakdown
+                text_content = []
+                for i, word_score in enumerate(reversed(self.word_history)):
+                    time_str = f"{word_score.start_time:.1f}s"
+                    conf_str = f"{word_score.confidence*100:.1f}%"
+                    sem_str = f"{word_score.semantic_similarity*100:.1f}%"
+                    lm_str = f"{word_score.language_model_score*100:.1f}%"
+                    
+                    text_content.append(
+                        f"{time_str} | {word_score.word:<10} | "
+                        f"Conf: {conf_str} (Sem: {sem_str}, LM: {lm_str})"
+                    )
+                
+                self.ax_word.text(
+                    0.05, 0.95,
+                    "\n".join(text_content),
+                    fontsize=10,
+                    family='monospace',
                     verticalalignment='top',
-                    transform=self.ax_text.transAxes
+                    transform=self.ax_word.transAxes
                 )
             
             self.current_time += 1
