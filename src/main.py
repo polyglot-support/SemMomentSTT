@@ -19,6 +19,8 @@ from .integration.pipeline import (
     ProcessingResult,
     NBestHypothesis
 )
+from .semantic.lattice import LatticePath
+from .decoder.text_decoder import WordScore
 
 class TranscriptionResult(NamedTuple):
     """Container for transcription results"""
@@ -27,6 +29,7 @@ class TranscriptionResult(NamedTuple):
     timestamp: float
     word_scores: Optional[List[WordScore]] = None
     n_best: Optional[List[NBestHypothesis]] = None
+    lattice_paths: Optional[List[LatticePath]] = None
 
 class SemMomentSTT:
     def __init__(
@@ -93,7 +96,8 @@ class SemMomentSTT:
         audio_path: Union[str, Path],
         chunk_duration: float = 0.5,
         return_word_scores: bool = False,
-        return_n_best: bool = False
+        return_n_best: bool = False,
+        return_lattice: bool = False
     ) -> Union[str, List[TranscriptionResult]]:
         """
         Transcribe an audio file
@@ -103,6 +107,7 @@ class SemMomentSTT:
             chunk_duration: Duration of each audio chunk in seconds
             return_word_scores: Whether to return detailed word-level results
             return_n_best: Whether to return N-best hypotheses
+            return_lattice: Whether to return lattice paths
             
         Returns:
             Transcribed text or list of TranscriptionResult with details
@@ -138,10 +143,11 @@ class SemMomentSTT:
                     confidence=result.decoding_result.confidence,
                     timestamp=result.decoding_result.word_scores[0].start_time,
                     word_scores=result.decoding_result.word_scores if return_word_scores else None,
-                    n_best=result.n_best if return_n_best else None
+                    n_best=result.n_best if return_n_best else None,
+                    lattice_paths=result.lattice_paths if return_lattice else None
                 ))
         
-        if return_word_scores or return_n_best:
+        if return_word_scores or return_n_best or return_lattice:
             return results
         else:
             # Join text with spaces, filtering None values
@@ -152,7 +158,8 @@ class SemMomentSTT:
         audio_stream: Generator[np.ndarray, None, None],
         stream_sample_rate: Optional[int] = None,
         chunk_duration: Optional[float] = None,
-        return_n_best: bool = False
+        return_n_best: bool = False,
+        return_lattice: bool = False
     ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe a stream of audio data
@@ -162,6 +169,7 @@ class SemMomentSTT:
             stream_sample_rate: Sample rate of the audio stream
             chunk_duration: Duration of each chunk in seconds
             return_n_best: Whether to return N-best hypotheses
+            return_lattice: Whether to return lattice paths
             
         Yields:
             TranscriptionResult for each processed chunk
@@ -179,7 +187,8 @@ class SemMomentSTT:
                     confidence=result.decoding_result.confidence,
                     timestamp=result.decoding_result.word_scores[0].start_time,
                     word_scores=result.decoding_result.word_scores,
-                    n_best=result.n_best if return_n_best else None
+                    n_best=result.n_best if return_n_best else None,
+                    lattice_paths=result.lattice_paths if return_lattice else None
                 )
     
     def transcribe_microphone(
@@ -187,7 +196,8 @@ class SemMomentSTT:
         device: Optional[int] = None,
         chunk_duration: float = 0.5,
         input_sample_rate: Optional[int] = None,
-        return_n_best: bool = False
+        return_n_best: bool = False,
+        return_lattice: bool = False
     ) -> Generator[TranscriptionResult, None, None]:
         """
         Transcribe audio from microphone in real-time
@@ -197,6 +207,7 @@ class SemMomentSTT:
             chunk_duration: Duration of each audio chunk in seconds
             input_sample_rate: Sample rate to use for input (None for device default)
             return_n_best: Whether to return N-best hypotheses
+            return_lattice: Whether to return lattice paths
             
         Yields:
             TranscriptionResult as text becomes available
@@ -250,7 +261,8 @@ class SemMomentSTT:
                             confidence=result.decoding_result.confidence,
                             timestamp=result.decoding_result.word_scores[0].start_time,
                             word_scores=result.decoding_result.word_scores,
-                            n_best=result.n_best if return_n_best else None
+                            n_best=result.n_best if return_n_best else None,
+                            lattice_paths=result.lattice_paths if return_lattice else None
                         )
                         
             except KeyboardInterrupt:
@@ -272,6 +284,15 @@ class SemMomentSTT:
             List of word scores with timing information
         """
         return self.pipeline.get_word_history(time_window)
+    
+    def get_lattice_visualization(self) -> str:
+        """
+        Get DOT format visualization of current word lattice
+        
+        Returns:
+            DOT format string for visualization
+        """
+        return self.pipeline.get_lattice_dot()
     
     def stop_microphone(self):
         """Stop microphone transcription"""
