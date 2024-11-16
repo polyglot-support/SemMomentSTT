@@ -5,14 +5,16 @@ This module handles the acoustic processing pipeline including:
 - Feature extraction from audio input
 - Wav2Vec2 model integration
 - Sliding window processing
+- Audio resampling
 """
 
 import torch
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 import torch.nn.functional as F
+import librosa
 
 @dataclass
 class AcousticFeatures:
@@ -36,7 +38,7 @@ class AcousticProcessor:
         Args:
             model_name: Name of the pretrained Wav2Vec2 model
             device: Device to run the model on (cpu/cuda)
-            sample_rate: Audio sample rate (default: 16kHz)
+            sample_rate: Target audio sample rate (default: 16kHz)
             chunk_length: Length of audio chunks to process (in seconds)
         """
         self.model_name = model_name
@@ -56,16 +58,53 @@ class AcousticProcessor:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize Wav2Vec2 model: {str(e)}")
     
-    def _preprocess_audio(self, audio_frame: np.ndarray) -> torch.Tensor:
+    def _resample_audio(
+        self,
+        audio: np.ndarray,
+        orig_sr: int
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Resample audio to target sample rate
+        
+        Args:
+            audio: Audio data to resample
+            orig_sr: Original sample rate of the audio
+            
+        Returns:
+            Tuple of (resampled audio, duration in seconds)
+        """
+        if orig_sr != self.sample_rate:
+            # Resample using librosa
+            audio = librosa.resample(
+                y=audio,
+                orig_sr=orig_sr,
+                target_sr=self.sample_rate
+            )
+        
+        duration = len(audio) / self.sample_rate
+        return audio, duration
+    
+    def _preprocess_audio(
+        self,
+        audio_frame: np.ndarray,
+        orig_sr: Optional[int] = None
+    ) -> Tuple[torch.Tensor, float]:
         """
         Preprocess audio frame for Wav2Vec2 model
         
         Args:
             audio_frame: Raw audio frame data
+            orig_sr: Original sample rate (if different from target)
             
         Returns:
-            Preprocessed audio tensor
+            Tuple of (preprocessed audio tensor, duration in seconds)
         """
+        # Handle resampling if needed
+        if orig_sr is not None and orig_sr != self.sample_rate:
+            audio_frame, duration = self._resample_audio(audio_frame, orig_sr)
+        else:
+            duration = len(audio_frame) / self.sample_rate
+        
         # Ensure correct shape and type
         if audio_frame.ndim == 1:
             audio_frame = audio_frame.reshape(1, -1)
@@ -82,21 +121,26 @@ class AcousticProcessor:
             padding=True
         )
         
-        return inputs.input_values.to(self.device)
+        return inputs.input_values.to(self.device), duration
     
     @torch.no_grad()
-    def process_frame(self, audio_frame: np.ndarray) -> AcousticFeatures:
+    def process_frame(
+        self,
+        audio_frame: np.ndarray,
+        orig_sr: Optional[int] = None
+    ) -> AcousticFeatures:
         """
         Process a single frame of audio
         
         Args:
             audio_frame: Raw audio frame data
+            orig_sr: Original sample rate (if different from target)
             
         Returns:
             Extracted acoustic features
         """
         # Preprocess audio
-        input_values = self._preprocess_audio(audio_frame)
+        input_values, duration = self._preprocess_audio(audio_frame, orig_sr)
         
         # Extract features through Wav2Vec2
         outputs = self.model(input_values)
@@ -111,7 +155,7 @@ class AcousticProcessor:
         
         return AcousticFeatures(
             features=features,
-            timestamp=len(audio_frame) / self.sample_rate,
+            timestamp=duration,
             window_size=self.chunk_samples,
             confidence=confidence
         )
