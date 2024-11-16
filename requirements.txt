@@ -7,10 +7,19 @@ scipy>=1.10.0
 
 # Audio processing
 sounddevice>=0.4.6  # For microphone input
-librosa>=0.10.0     # For audio file handling
+soundfile>=0.12.1   # For audio file handling
+librosa>=0.10.0     # For audio processing utilities
+
+# Visualization
+matplotlib>=3.7.1
+scikit-learn>=1.3.0  # For PCA in visualization
 
 # Development dependencies
 pytest>=7.3.1
 black>=23.3.0
 mypy>=1.3.0
 pylint>=2.17.0
+
+# Optional dependencies
+tensorboard>=2.13.0  # For experiment tracking
+tqdm>=4.65.0        # For progress bars
