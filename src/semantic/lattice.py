@@ -161,15 +161,19 @@ class WordLattice:
         # Process each path
         for path_idx, (traj_path, path_scores) in enumerate(zip(trajectories, word_scores)):
             prev_node_id = None
+            base_time = 0.0
             
             for i, (trajectory, (word, acoustic, lm, semantic)) in enumerate(zip(traj_path, path_scores)):
+                # Create timestamp that ensures temporal ordering
+                timestamp = base_time + i * 0.5  # 0.5 seconds between words
+                
                 # Create node
                 node_id = self.add_node(
                     word=word,
-                    timestamp=trajectory.history[-1][0],  # Last timestamp
+                    timestamp=timestamp,
                     trajectory_id=trajectory.id,
                     semantic_vector=trajectory.position,
-                    confidence=trajectory.confidence,
+                    confidence=trajectory.confidence * max(acoustic, lm, semantic),  # Scale confidence by best score
                     is_start=(i == 0),
                     is_end=(i == len(traj_path) - 1)
                 )
@@ -297,6 +301,11 @@ class WordLattice:
                 )
                 if edge_score < min_score:
                     edges_to_remove.add((start, end))
+                    # Also remove connected nodes if they become disconnected
+                    if all((s, e) in edges_to_remove for (s, e) in self.edges if s == start):
+                        nodes_to_remove.add(start)
+                    if all((s, e) in edges_to_remove for (s, e) in self.edges if e == end):
+                        nodes_to_remove.add(end)
         
         # Remove edges
         for edge_key in edges_to_remove:

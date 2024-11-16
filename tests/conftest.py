@@ -6,6 +6,7 @@ from src.acoustic.processor import AcousticProcessor
 from src.decoder.text_decoder import TextDecoder
 from src.integration.pipeline import IntegrationPipeline
 from src.semantic.momentum_tracker import MomentumTracker
+from src.semantic.types import SemanticTrajectory, TrajectoryState
 
 @pytest.fixture(scope="session")
 def shared_acoustic_processor():
@@ -84,6 +85,54 @@ def mock_word_scores():
         ('world', 0.7, 0.8, 0.6),
         ('test', 0.9, 0.8, 0.7)
     ]
+
+@pytest.fixture
+def mock_trajectory():
+    """Create a mock trajectory for testing"""
+    vector = np.random.randn(768)
+    vector = vector / np.linalg.norm(vector)
+    
+    return SemanticTrajectory(
+        id=1,
+        position=vector,
+        momentum=vector * 0.1,
+        confidence=0.8,
+        state=TrajectoryState.ACTIVE,
+        history=[vector.copy()]
+    )
+
+@pytest.fixture
+def mock_trajectories():
+    """Create a list of mock trajectory paths for testing"""
+    def create_trajectory(id, confidence):
+        vector = np.random.randn(768)
+        vector = vector / np.linalg.norm(vector)
+        return SemanticTrajectory(
+            id=id,
+            position=vector,
+            momentum=vector * 0.1,
+            confidence=confidence,
+            state=TrajectoryState.ACTIVE,
+            history=[vector.copy()]
+        )
+    
+    # Create two paths, each with 3 trajectories
+    paths = [
+        # First path with high confidence
+        [
+            create_trajectory(1, 0.9),
+            create_trajectory(2, 0.85),
+            create_trajectory(3, 0.8)
+        ],
+        # Second path with lower confidence
+        [
+            create_trajectory(4, 0.8),
+            create_trajectory(5, 0.75),
+            create_trajectory(6, 0.7)
+        ]
+    ]
+    
+    return paths
 
 def pytest_configure(config):
     """Custom pytest configuration"""

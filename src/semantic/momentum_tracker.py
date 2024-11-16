@@ -22,10 +22,10 @@ class MomentumTracker:
         self,
         semantic_dim: int = 768,
         max_trajectories: int = 5,
-        momentum_decay: float = 0.95,  # Keep as is
+        momentum_decay: float = 0.95,
         min_confidence: float = 0.1,
-        merge_threshold: float = 0.85,  # Keep as is
-        force_scale: float = 1.274,  # Keep as is
+        merge_threshold: float = 0.85,
+        force_scale: float = 1.274,
         beam_width: int = 3,
         beam_depth: int = 5
     ):
@@ -84,19 +84,36 @@ class MomentumTracker:
         for center, strength in zip(self.attraction_centers, self.attraction_strengths):
             direction = center - position
             distance = max(np.linalg.norm(direction), 1e-6)
-            force += strength * direction / (1 + distance ** 2)
+            force += strength * direction / (distance ** 2)
         
         # Add forces from other trajectories
         for trajectory in self.active_trajectories:
             if not np.array_equal(trajectory.position, position):
                 direction = trajectory.position - position
                 distance = max(np.linalg.norm(direction), 1e-6)
-                force -= 0.01 * direction / (1 + distance ** 2)
+                force -= 0.01 * direction / (distance ** 2)
         
-        # Scale and clip force
-        force = np.clip(force * self.force_scale, -1.0, 1.0)
+        # Scale force
+        force *= self.force_scale
         
         return force
+    
+    def _update_momentum(self, trajectory: SemanticTrajectory, force: np.ndarray):
+        """Update trajectory momentum with decay and new force"""
+        # Apply momentum decay while preserving direction
+        if not np.allclose(trajectory.momentum, 0):
+            momentum_magnitude = np.linalg.norm(trajectory.momentum)
+            if momentum_magnitude > 1e-6:
+                momentum_dir = trajectory.momentum / momentum_magnitude
+                new_magnitude = momentum_magnitude * self.momentum_decay
+                trajectory.momentum = momentum_dir * new_magnitude
+        
+        # Add force contribution
+        if not np.allclose(force, 0):
+            force_magnitude = np.linalg.norm(force)
+            if force_magnitude > 1e-6:
+                force_dir = force / force_magnitude
+                trajectory.momentum += force_dir * self.force_scale * 0.5  # Increased force contribution
     
     def update_trajectories(self, acoustic_evidence: np.ndarray, confidence: float):
         """
@@ -108,6 +125,10 @@ class MomentumTracker:
         """
         # Make a copy of the evidence vector
         acoustic_evidence = np.array(acoustic_evidence, copy=True)
+        acoustic_evidence = acoustic_evidence / np.linalg.norm(acoustic_evidence)
+        
+        # Try to merge similar trajectories first
+        self.merge_similar_trajectories()
         
         # Check if we can merge with any existing trajectory
         merged = False
@@ -115,52 +136,55 @@ class MomentumTracker:
             for traj in self.active_trajectories:
                 similarity = 1 - cosine(traj.position, acoustic_evidence)
                 if similarity > self.merge_threshold:
-                    # Merge new evidence into existing trajectory
+                    # Update confidence before merging
+                    new_confidence = max(traj.confidence, confidence)
+                    
+                    # Merge positions with proper normalization
                     weight1 = traj.confidence / (traj.confidence + confidence)
                     weight2 = confidence / (traj.confidence + confidence)
-                    traj.position = weight1 * traj.position + weight2 * acoustic_evidence
-                    traj.confidence = max(traj.confidence, confidence)
+                    merged_pos = weight1 * traj.position + weight2 * acoustic_evidence
+                    pos_norm = np.linalg.norm(merged_pos)
+                    if pos_norm > 1e-6:
+                        traj.position = merged_pos / pos_norm
+                    
+                    # Update momentum - preserve direction but adjust magnitude
+                    if not np.allclose(traj.momentum, 0):
+                        momentum_dir = traj.momentum / np.linalg.norm(traj.momentum)
+                        traj.momentum = momentum_dir * np.linalg.norm(traj.momentum) * self.momentum_decay
+                    
+                    traj.confidence = new_confidence
                     merged = True
                     break
         
         # Create new trajectory if not merged
-        if not merged and len(self.active_trajectories) < self.beam_search.beam_width:
+        if not merged and confidence >= self.min_confidence and len(self.active_trajectories) < self.beam_search.beam_width:
             trajectory = self._create_trajectory(acoustic_evidence, confidence)
             self.trajectories[trajectory.id] = trajectory
-            return  # Return early to avoid updating the new trajectory
         
         # Update existing trajectories
         for traj in self.active_trajectories:
             # First update - apply force to build momentum
             if np.allclose(traj.momentum, 0):
-                # Compute initial force
                 force = acoustic_evidence - traj.position
-                force = np.clip(force * self.force_scale, -1.0, 1.0)
-                
-                # Update momentum with step size
-                traj.momentum = force * 0.01  
-                
-                # Update position
-                traj.position += traj.momentum
+                force_magnitude = np.linalg.norm(force)
+                if force_magnitude > 1e-6:
+                    force_dir = force / force_magnitude
+                    traj.momentum = force_dir * self.force_scale * 0.5  # Increased initial momentum
             else:
-                # Apply momentum decay first
-                traj.momentum *= self.momentum_decay
-                
-                # Apply semantic forces
+                # Compute and apply forces
                 force = self.compute_force_field(traj.position)
-                
-                # Add force from acoustic evidence
                 evidence_force = acoustic_evidence - traj.position
                 force += evidence_force * confidence
                 
-                # Update momentum with step size
-                traj.momentum += force * 0.01  
-                
-                # Clip momentum to prevent instability
-                traj.momentum = np.clip(traj.momentum, -1.0, 1.0)
-                
-                # Update position
+                # Update momentum with decay and new force
+                self._update_momentum(traj, force)
+            
+            # Update position
+            if not np.allclose(traj.momentum, 0):
                 traj.position += traj.momentum
+                pos_norm = np.linalg.norm(traj.position)
+                if pos_norm > 1e-6:
+                    traj.position = traj.position / pos_norm
             
             # Update history
             traj.history.append(traj.position.copy())
@@ -168,19 +192,20 @@ class MomentumTracker:
             # Update confidence
             self._update_confidence(traj, acoustic_evidence, confidence)
         
+        # Try to merge similar trajectories again
+        self.merge_similar_trajectories()
+        
         # Prune low confidence trajectories
         self.prune_trajectories()
         
         # Ensure we don't exceed beam width
         if len(self.active_trajectories) > self.beam_search.beam_width:
-            # Keep only the highest confidence trajectories
             active = sorted(
                 self.active_trajectories,
                 key=lambda t: t.confidence,
                 reverse=True
             )[:self.beam_search.beam_width]
             
-            # Mark others as pruned
             for traj in self.active_trajectories:
                 if traj not in active:
                     traj.state = TrajectoryState.PRUNED
@@ -200,15 +225,19 @@ class MomentumTracker:
         Returns:
             New trajectory instance
         """
-        # Make a deep copy of the position vector
+        # Make a deep copy and normalize the position vector
         position = np.array(position, copy=True)
+        position = position / np.linalg.norm(position)
+        
+        # Set initial state based on confidence
+        state = TrajectoryState.ACTIVE if confidence >= self.min_confidence else TrajectoryState.PRUNED
         
         trajectory = SemanticTrajectory(
             id=self.next_trajectory_id,
-            position=position,  # Use position directly without normalization
+            position=position,
             momentum=np.zeros_like(position),
             confidence=confidence,
-            state=TrajectoryState.ACTIVE,
+            state=state,
             history=[position.copy()]
         )
         self.next_trajectory_id += 1
@@ -237,37 +266,49 @@ class MomentumTracker:
             0.3 * similarity * evidence_confidence
         )
         trajectory.confidence = np.clip(trajectory.confidence, 0.0, 1.0)
+        
+        # Mark as pruned if below threshold
+        if trajectory.confidence < self.min_confidence:
+            trajectory.state = TrajectoryState.PRUNED
     
     def merge_similar_trajectories(self):
         """Merge trajectories that are close in semantic space"""
         active = self.active_trajectories
         if len(active) <= 1:
             return
-            
-        merged_ids = set()
+        
+        # Sort by confidence to preserve highest confidence trajectories
+        active = sorted(active, key=lambda t: t.confidence, reverse=True)
         
         for i, t1 in enumerate(active):
-            if t1.id in merged_ids:
-                continue
-                
             for t2 in active[i+1:]:
-                if t2.id in merged_ids:
+                if t2.state != TrajectoryState.ACTIVE:
                     continue
                     
-                # Compute similarity
                 similarity = 1 - cosine(t1.position, t2.position)
                 
                 if similarity > self.merge_threshold:
-                    # Merge t2 into t1
+                    # Update confidence before merging
+                    new_confidence = max(t1.confidence, t2.confidence)
+                    
+                    # Merge positions with proper normalization
                     weight1 = t1.confidence / (t1.confidence + t2.confidence)
                     weight2 = t2.confidence / (t1.confidence + t2.confidence)
+                    merged_pos = weight1 * t1.position + weight2 * t2.position
+                    pos_norm = np.linalg.norm(merged_pos)
+                    if pos_norm > 1e-6:
+                        t1.position = merged_pos / pos_norm
                     
-                    t1.position = weight1 * t1.position + weight2 * t2.position
-                    t1.momentum = weight1 * t1.momentum + weight2 * t2.momentum
-                    t1.confidence = max(t1.confidence, t2.confidence)
+                    # Update momentum - preserve direction but combine magnitudes
+                    if not np.allclose(t1.momentum, 0) and not np.allclose(t2.momentum, 0):
+                        m1_norm = np.linalg.norm(t1.momentum)
+                        m2_norm = np.linalg.norm(t2.momentum)
+                        if m1_norm > 1e-6:
+                            t1.momentum = (t1.momentum / m1_norm) * (weight1 * m1_norm + weight2 * m2_norm)
                     
+                    t1.confidence = new_confidence
                     t2.state = TrajectoryState.MERGED
-                    merged_ids.add(t2.id)
+                    return  # Exit after successful merge
     
     def prune_trajectories(self):
         """Remove low confidence trajectories"""
@@ -295,5 +336,4 @@ class MomentumTracker:
         active = self.active_trajectories
         if not active:
             return []
-        # Sort by confidence and return each trajectory as its own path
         return [[t] for t in sorted(active, key=lambda t: t.confidence, reverse=True)]
