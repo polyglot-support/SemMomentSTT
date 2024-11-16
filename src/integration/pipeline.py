@@ -43,7 +43,12 @@ class IntegrationPipeline:
         context_window: int = 10,
         device: Optional[str] = None,
         max_trajectories: int = 5,
-        n_best: int = 5
+        n_best: int = 5,
+        force_scale: float = 1.274,
+        step_size: float = 100.0,
+        momentum_decay: float = 0.999,
+        min_confidence: float = 0.1,
+        merge_threshold: float = 0.85
     ):
         """
         Initialize the integration pipeline
@@ -56,6 +61,11 @@ class IntegrationPipeline:
             device: Device to run models on
             max_trajectories: Maximum number of semantic trajectories
             n_best: Number of hypotheses to maintain
+            force_scale: Scaling factor for semantic forces
+            step_size: Step size for momentum updates
+            momentum_decay: Decay factor for momentum
+            min_confidence: Minimum confidence threshold
+            merge_threshold: Threshold for merging trajectories
         """
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.context_window = context_window
@@ -71,7 +81,11 @@ class IntegrationPipeline:
         self.momentum_tracker = MomentumTracker(
             semantic_dim=semantic_dim,
             max_trajectories=max_trajectories,
-            beam_width=n_best
+            beam_width=n_best,
+            force_scale=force_scale,
+            momentum_decay=momentum_decay,
+            min_confidence=min_confidence,
+            merge_threshold=merge_threshold
         )
         
         self.text_decoder = TextDecoder(
