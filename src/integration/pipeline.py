@@ -6,6 +6,7 @@ This module handles the integration between acoustic and semantic components:
 - Context integration
 - Pipeline coordination
 - Text decoding with word-level confidence
+- N-best list generation
 """
 
 from typing import Optional, List, Generator, Tuple, NamedTuple
@@ -17,10 +18,18 @@ from ..acoustic.processor import AcousticProcessor, AcousticFeatures
 from ..semantic.momentum_tracker import MomentumTracker, SemanticTrajectory
 from ..decoder.text_decoder import TextDecoder, WordScore, DecodingResult
 
+class NBestHypothesis(NamedTuple):
+    """Container for N-best hypothesis"""
+    text: str
+    confidence: float
+    word_scores: List[WordScore]
+    trajectory_path: List[SemanticTrajectory]
+
 class ProcessingResult(NamedTuple):
     """Container for processing results"""
     trajectory: Optional[SemanticTrajectory]
     decoding_result: Optional[DecodingResult]
+    n_best: List[NBestHypothesis]
     features: Optional[AcousticFeatures] = None
 
 class IntegrationPipeline:
@@ -31,7 +40,8 @@ class IntegrationPipeline:
         semantic_dim: int = 768,
         context_window: int = 10,
         device: Optional[str] = None,
-        max_trajectories: int = 5
+        max_trajectories: int = 5,
+        n_best: int = 5
     ):
         """
         Initialize the integration pipeline
@@ -43,10 +53,12 @@ class IntegrationPipeline:
             context_window: Size of context window in frames
             device: Device to run models on
             max_trajectories: Maximum number of semantic trajectories
+            n_best: Number of hypotheses to maintain
         """
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.context_window = context_window
         self.semantic_dim = semantic_dim
+        self.n_best = n_best
         
         # Initialize components
         self.acoustic_processor = AcousticProcessor(
@@ -56,7 +68,8 @@ class IntegrationPipeline:
         
         self.momentum_tracker = MomentumTracker(
             semantic_dim=semantic_dim,
-            max_trajectories=max_trajectories
+            max_trajectories=max_trajectories,
+            beam_width=n_best  # Use n_best for beam width
         )
         
         self.text_decoder = TextDecoder(
@@ -119,27 +132,43 @@ class IntegrationPipeline:
             confidence=acoustic_features.confidence
         )
         
-        # Maintain trajectories
-        self.momentum_tracker.merge_similar_trajectories()
-        self.momentum_tracker.prune_trajectories()
+        # Get N-best trajectory paths
+        paths = self.momentum_tracker.get_trajectory_paths()
         
-        # Get best trajectory
-        trajectory = self.momentum_tracker.get_best_trajectory()
+        # Process N-best hypotheses
+        n_best_results = []
+        best_decoding = None
+        best_trajectory = None
         
-        # Decode text if trajectory exists
-        decoding_result = None
-        if trajectory is not None:
+        for path in paths[:self.n_best]:
+            if not path:
+                continue
+                
+            current_traj = path[-1]
             decoding_result = self.text_decoder.decode_trajectory(
-                trajectory,
+                current_traj,
                 timestamp=self.current_time,
                 duration=frame_duration
             )
+            
+            if decoding_result is not None:
+                n_best_results.append(NBestHypothesis(
+                    text=decoding_result.text,
+                    confidence=decoding_result.confidence,
+                    word_scores=decoding_result.word_scores,
+                    trajectory_path=path
+                ))
+                
+                # Keep track of best result
+                if best_decoding is None or decoding_result.confidence > best_decoding.confidence:
+                    best_decoding = decoding_result
+                    best_trajectory = current_traj
         
         # Update time tracking
         self.current_time += frame_duration
         
         features = acoustic_features if return_features else None
-        return ProcessingResult(trajectory, decoding_result, features)
+        return ProcessingResult(best_trajectory, best_decoding, n_best_results, features)
     
     def process_stream(
         self,
@@ -244,7 +273,7 @@ class IntegrationPipeline:
             time_window: Optional time window in seconds
             
         Returns:
-            List of word scores
+            List of word scores with timing information
         """
         return self.text_decoder.get_word_history(time_window)
     
