@@ -30,7 +30,7 @@
 - [x] Complete acoustic-semantic mapping
 - [x] Add audio resampling support
 - [x] Implement text decoding from trajectories
-- [ ] Add word-level confidence scoring
+- [x] Add word-level confidence scoring
 - [ ] Implement beam search for trajectories
 
 ### Initial Testing
@@ -40,6 +40,7 @@
 - [x] Implement unit tests for core modules
 - [x] Add sample rate conversion tests
 - [x] Add text decoder tests
+- [x] Add word-level confidence tests
 - [ ] Add integration tests for full pipeline
 - [ ] Set up CI/CD pipeline
 - [ ] Add performance benchmarks
@@ -53,6 +54,7 @@
 - [x] Add usage examples
 - [x] Add visualization examples
 - [x] Document text decoding API
+- [x] Document word-level confidence API
 - [ ] Create full API reference
 - [ ] Write contributing guidelines
 
@@ -62,6 +64,7 @@
 - [x] Implement core test suite
 - [x] Add audio processing error handling
 - [x] Add text decoding error handling
+- [x] Add word-level confidence validation
 - [ ] Add code style enforcement
 - [ ] Set up performance benchmarks
 
@@ -95,6 +98,8 @@
 - [x] Implement BERT-based text decoder
 - [x] Add timestamp support
 - [x] Integrate confidence scoring
+- [x] Add word-level confidence analysis
+- [x] Implement word history tracking
 
 ## Blocked
 
@@ -118,6 +123,7 @@
 - [x] Core algorithms
 - [x] Implementation details
 - [x] Text decoding approach
+- [x] Confidence scoring method
 - [ ] Theoretical analysis
 - [ ] Complexity analysis
 
@@ -150,12 +156,13 @@
 - [x] Initial testing
 - [x] Basic visualization
 - [x] Text decoding
+- [x] Word-level confidence
 
 ### Month 2
-- [ ] Word-level confidence
 - [ ] Beam search implementation
 - [ ] Performance optimization
 - [ ] Initial results
+- [ ] System evaluation
 
 ### Month 3
 - [ ] Comprehensive testing
