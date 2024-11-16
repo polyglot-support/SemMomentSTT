@@ -9,305 +9,281 @@ from src.semantic.types import (
     BeamHypothesis
 )
 
-def test_momentum_tracker_initialization(shared_momentum_tracker):
-    """Test that MomentumTracker initializes correctly"""
-    tracker = shared_momentum_tracker
-    assert tracker.semantic_dim == 768
-    assert tracker.max_trajectories == 5
-    assert tracker.momentum_decay == 0.95
-    assert tracker.min_confidence == 0.1
-    assert tracker.merge_threshold == 0.85
-    assert hasattr(tracker, 'beam_search')
-    assert tracker.beam_search.beam_width == 3
-    assert tracker.beam_search.max_depth == 5
+class TestMomentumTracker:
+    """Test suite for MomentumTracker class"""
 
-def test_force_field_computation(shared_momentum_tracker, mock_vector):
-    """Test force field computation"""
-    tracker = shared_momentum_tracker
-    # Reset state
-    tracker.trajectories.clear()
-    
-    force = tracker.compute_force_field(mock_vector)
-    
-    assert force.shape == mock_vector.shape
-    assert isinstance(force, np.ndarray)
-    assert not np.allclose(force, 0)  # Force field should not be zero everywhere
+    class TestInitialization:
+        """Tests for MomentumTracker initialization"""
 
-def test_trajectory_creation(shared_momentum_tracker, mock_vector):
-    """Test creation of new trajectories"""
-    tracker = shared_momentum_tracker
-    # Reset state
-    tracker.trajectories.clear()
-    
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    
-    assert len(tracker.active_trajectories) > 0
-    trajectory = tracker.active_trajectories[0]
-    assert np.allclose(trajectory.position, mock_vector)
-    assert trajectory.confidence == 0.8
-    assert trajectory.state == TrajectoryState.ACTIVE
+        def test_dimension_setting(self, shared_momentum_tracker):
+            """Test semantic dimension configuration"""
+            assert shared_momentum_tracker.semantic_dim == 768
 
-# Breaking down test_trajectory_update into smaller tests
-def test_initial_momentum_zero(shared_momentum_tracker, mock_vector):
-    """Test that new trajectories start with zero momentum"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    trajectory = tracker.active_trajectories[0]
-    
-    assert np.allclose(trajectory.momentum, 0)
+        def test_trajectory_limits(self, shared_momentum_tracker):
+            """Test trajectory limit settings"""
+            assert shared_momentum_tracker.max_trajectories == 5
 
-def test_momentum_builds_up(shared_momentum_tracker, mock_vector):
-    """Test that momentum builds up from zero"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create trajectory and update once
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    trajectory = tracker.active_trajectories[0]
-    initial_momentum = np.linalg.norm(trajectory.momentum)
-    
-    # Update with opposite direction
-    new_evidence = -mock_vector
-    tracker.update_trajectories(new_evidence, confidence=0.9)
-    final_momentum = np.linalg.norm(trajectory.momentum)
-    
-    assert final_momentum > initial_momentum
+        def test_momentum_parameters(self, shared_momentum_tracker):
+            """Test momentum-related parameters"""
+            assert shared_momentum_tracker.momentum_decay == 0.95
+            assert shared_momentum_tracker.min_confidence == 0.1
+            assert shared_momentum_tracker.merge_threshold == 0.85
 
-def test_position_changes(shared_momentum_tracker, mock_vector):
-    """Test that position changes with updates"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create trajectory
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    initial_position = tracker.active_trajectories[0].position.copy()
-    
-    # Update with new evidence
-    new_evidence = mock_vector + np.random.randn(768) * 0.1
-    new_evidence = new_evidence / np.linalg.norm(new_evidence)
-    tracker.update_trajectories(new_evidence, confidence=0.9)
-    
-    current_position = tracker.active_trajectories[0].position
-    position_delta = np.linalg.norm(current_position - initial_position)
-    assert position_delta > 0
+        def test_beam_search_configuration(self, shared_momentum_tracker):
+            """Test beam search configuration"""
+            assert hasattr(shared_momentum_tracker, 'beam_search')
+            assert shared_momentum_tracker.beam_search.beam_width == 3
+            assert shared_momentum_tracker.beam_search.max_depth == 5
 
-# Breaking down test_trajectory_merging into smaller tests
-def test_similar_trajectories_detected(shared_momentum_tracker, mock_vector):
-    """Test that similar trajectories are detected"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create base trajectory
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    
-    # Create similar trajectory
-    similar_vector = mock_vector + np.random.randn(768) * 0.01  # Very small perturbation
-    similar_vector = similar_vector / np.linalg.norm(similar_vector)
-    
-    # Check similarity
-    similarity = 1 - cosine(mock_vector, similar_vector)
-    assert similarity > tracker.merge_threshold
+    class TestForceField:
+        """Tests for force field computations"""
 
-def test_trajectory_merging_reduces_count(shared_momentum_tracker, mock_vector):
-    """Test that merging reduces trajectory count"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create first trajectory
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    
-    # Create very similar trajectory
-    similar_vector = mock_vector + np.random.randn(768) * 0.01
-    similar_vector = similar_vector / np.linalg.norm(similar_vector)
-    tracker.update_trajectories(similar_vector, confidence=0.7)
-    
-    # Check merged state
-    merged_trajectories = [t for t in tracker.trajectories.values() 
-                         if t.state == TrajectoryState.MERGED]
-    assert len(merged_trajectories) > 0
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
 
-def test_merged_trajectory_properties(shared_momentum_tracker, mock_vector):
-    """Test properties of merged trajectories"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create trajectories to merge
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    similar_vector = mock_vector + np.random.randn(768) * 0.01
-    similar_vector = similar_vector / np.linalg.norm(similar_vector)
-    tracker.update_trajectories(similar_vector, confidence=0.7)
-    
-    # Get surviving trajectory
-    active = tracker.active_trajectories[0]
-    assert active.confidence >= 0.8  # Should keep highest confidence
-    assert active.state == TrajectoryState.ACTIVE
+        def test_output_shape(self, mock_vector):
+            """Test force field output shape"""
+            force = self.tracker.compute_force_field(mock_vector)
+            assert force.shape == mock_vector.shape
+            assert isinstance(force, np.ndarray)
 
-# Breaking down test_momentum_decay into smaller tests
-def test_momentum_decay_rate(shared_momentum_tracker, mock_vector):
-    """Test that momentum decays at the correct rate"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create and update trajectory to build momentum
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    new_evidence = -mock_vector
-    tracker.update_trajectories(new_evidence, confidence=0.9)
-    
-    trajectory = tracker.active_trajectories[0]
-    momentum_before = np.linalg.norm(trajectory.momentum)
-    
-    # Let momentum decay
-    tracker.update_trajectories(mock_vector, confidence=0.7)
-    momentum_after = np.linalg.norm(trajectory.momentum)
-    
-    expected_ratio = tracker.momentum_decay
-    actual_ratio = momentum_after / momentum_before
-    assert np.isclose(actual_ratio, expected_ratio, rtol=0.1)
+        def test_empty_trajectories(self, mock_vector):
+            """Test force field with no trajectories"""
+            force = self.tracker.compute_force_field(mock_vector)
+            assert not np.allclose(force, 0)
 
-def test_momentum_decay_direction(shared_momentum_tracker, mock_vector):
-    """Test that momentum decay preserves direction"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Build momentum
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    new_evidence = -mock_vector
-    tracker.update_trajectories(new_evidence, confidence=0.9)
-    
-    trajectory = tracker.active_trajectories[0]
-    direction_before = trajectory.momentum / np.linalg.norm(trajectory.momentum)
-    
-    # Let momentum decay
-    tracker.update_trajectories(mock_vector, confidence=0.7)
-    direction_after = trajectory.momentum / np.linalg.norm(trajectory.momentum)
-    
-    assert np.allclose(direction_before, direction_after, rtol=0.1)
+        def test_single_trajectory(self, mock_vector):
+            """Test force field with one trajectory"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            force = self.tracker.compute_force_field(mock_vector)
+            assert not np.allclose(force, 0)
 
-# Breaking down test_force_field_influence into smaller tests
-def test_attraction_center_creation(shared_momentum_tracker, mock_vector):
-    """Test creation of attraction centers"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Check attraction centers
-    assert tracker.attraction_centers.shape[0] == 10
-    assert tracker.attraction_centers.shape[1] == tracker.semantic_dim
-    
-    # Check normalization
-    norms = np.linalg.norm(tracker.attraction_centers, axis=1)
-    assert np.allclose(norms, 1.0)
+        def test_multiple_trajectories(self, mock_vector):
+            """Test force field with multiple trajectories"""
+            for i in range(3):
+                evidence = mock_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
+            force = self.tracker.compute_force_field(mock_vector)
+            assert not np.allclose(force, 0)
 
-def test_attraction_force_computation(shared_momentum_tracker, mock_vector):
-    """Test computation of attraction forces"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create trajectory
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    trajectory = tracker.active_trajectories[0]
-    
-    # Add attraction center
-    center_pos = trajectory.position + np.random.randn(768) * 0.1
-    center_pos = center_pos / np.linalg.norm(center_pos)
-    tracker.attraction_centers[0] = center_pos
-    tracker.attraction_strengths[0] = 2.0
-    
-    # Compute force
-    force = tracker.compute_force_field(trajectory.position)
-    assert not np.allclose(force, 0)
+    class TestTrajectoryCreation:
+        """Tests for trajectory creation"""
 
-def test_attraction_influence(shared_momentum_tracker, mock_vector):
-    """Test influence of attraction on trajectory"""
-    tracker = shared_momentum_tracker
-    tracker.trajectories.clear()
-    
-    # Create trajectory
-    tracker.update_trajectories(mock_vector, confidence=0.8)
-    trajectory = tracker.active_trajectories[0]
-    
-    # Add attraction center near trajectory
-    center_pos = trajectory.position + np.array([0.1] * 768)
-    center_pos = center_pos / np.linalg.norm(center_pos)
-    tracker.attraction_centers[0] = center_pos
-    tracker.attraction_strengths[0] = 2.0
-    
-    # Record initial distance
-    initial_dist = np.linalg.norm(trajectory.position - center_pos)
-    
-    # Update several times
-    for _ in range(3):
-        tracker.update_trajectories(mock_vector, confidence=0.8)
-    
-    # Check final distance
-    final_dist = np.linalg.norm(trajectory.position - center_pos)
-    assert final_dist != initial_dist  # Position should change due to attraction
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
 
-def test_beam_search_integration(shared_momentum_tracker, mock_vector):
-    """Test beam search integration"""
-    tracker = shared_momentum_tracker
-    # Reset state
-    tracker.trajectories.clear()
-    
-    # Create multiple trajectories
-    for _ in range(5):
-        evidence = mock_vector + np.random.randn(768) * 0.1
-        evidence = evidence / np.linalg.norm(evidence)
-        tracker.update_trajectories(evidence, confidence=0.8)
-    
-    # Should respect beam width
-    assert len(tracker.active_trajectories) <= tracker.beam_search.beam_width
-    
-    # Get trajectory paths
-    paths = tracker.get_trajectory_paths()
-    assert isinstance(paths, list)
-    assert all(isinstance(path, list) for path in paths)
-    assert all(isinstance(traj, SemanticTrajectory) for path in paths for traj in path)
+        def test_basic_creation(self, mock_vector):
+            """Test basic trajectory creation"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            assert len(self.tracker.active_trajectories) == 1
+            trajectory = self.tracker.active_trajectories[0]
+            assert np.allclose(trajectory.position, mock_vector)
+            assert trajectory.state == TrajectoryState.ACTIVE
 
-def test_best_trajectory_selection(shared_momentum_tracker, mock_vector):
-    """Test selection of best trajectory"""
-    tracker = shared_momentum_tracker
-    # Reset state
-    tracker.trajectories.clear()
-    
-    # Create trajectories with different confidences
-    confidences = [0.3, 0.8, 0.5]
-    for conf in confidences:
-        evidence = mock_vector + np.random.randn(768) * 0.1
-        evidence = evidence / np.linalg.norm(evidence)
-        tracker.update_trajectories(evidence, confidence=conf)
-    
-    best = tracker.get_best_trajectory()
-    assert best is not None
-    assert best.confidence == max(t.confidence for t in tracker.active_trajectories)
+        def test_confidence_setting(self, mock_vector):
+            """Test confidence setting in creation"""
+            confidence = 0.8
+            self.tracker.update_trajectories(mock_vector, confidence=confidence)
+            assert self.tracker.active_trajectories[0].confidence == confidence
 
-def test_path_consistency(shared_momentum_tracker, mock_vector):
-    """Test consistency of trajectory paths"""
-    tracker = shared_momentum_tracker
-    # Reset state
-    tracker.trajectories.clear()
-    
-    # Create sequence of related trajectories
-    base_vector = mock_vector
-    
-    for i in range(5):
-        # Gradually move the vector
-        evidence = base_vector + np.random.randn(768) * 0.1 * i
-        evidence = evidence / np.linalg.norm(evidence)
-        tracker.update_trajectories(evidence, confidence=0.8)
-    
-    # Get paths
-    paths = tracker.get_trajectory_paths()
-    if paths:
-        path = paths[0]  # Best path
-        
-        # Check temporal consistency
-        for i in range(len(path) - 1):
-            t1, t2 = path[i], path[i + 1]
-            # Later trajectories should have higher IDs
-            assert t1.id < t2.id
+        def test_capacity_limit(self, mock_vector):
+            """Test creation at capacity limit"""
+            for i in range(self.tracker.max_trajectories + 1):
+                evidence = mock_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
+            assert len(self.tracker.active_trajectories) <= self.tracker.max_trajectories
+
+        def test_below_confidence_threshold(self, mock_vector):
+            """Test creation below confidence threshold"""
+            self.tracker.update_trajectories(
+                mock_vector, 
+                confidence=self.tracker.min_confidence - 0.01
+            )
+            assert len(self.tracker.active_trajectories) == 0
+
+    class TestBeamSearchIntegration:
+        """Tests for beam search integration"""
+
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
+
+        def test_width_constraint(self, mock_vector):
+            """Test beam width constraint"""
+            for _ in range(self.tracker.beam_search.beam_width + 2):
+                evidence = mock_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
+            assert len(self.tracker.active_trajectories) <= self.tracker.beam_search.beam_width
+
+        def test_confidence_filtering(self, mock_vector):
+            """Test confidence-based filtering"""
+            confidences = [0.3, 0.8, 0.5]
+            for conf in confidences:
+                evidence = mock_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=conf)
+            assert all(t.confidence >= self.tracker.min_confidence 
+                      for t in self.tracker.active_trajectories)
+
+        def test_path_creation(self, mock_vector):
+            """Test trajectory path creation"""
+            for i in range(3):
+                evidence = mock_vector + np.random.randn(768) * 0.1 * i
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
             
-            # Positions should be somewhat similar
-            similarity = 1 - cosine(t1.position, t2.position)
-            assert similarity > 0.5  # Reasonable similarity threshold
+            paths = self.tracker.get_trajectory_paths()
+            assert isinstance(paths, list)
+            assert all(isinstance(path, list) for path in paths)
+            assert all(isinstance(traj, SemanticTrajectory) 
+                      for path in paths for traj in path)
+
+    class TestPathConsistency:
+        """Tests for path consistency"""
+
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
+
+        def test_temporal_ordering(self, mock_vector):
+            """Test temporal ordering of paths"""
+            for i in range(3):
+                evidence = mock_vector + np.random.randn(768) * 0.1 * i
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
+            
+            paths = self.tracker.get_trajectory_paths()
+            if paths:
+                path = paths[0]
+                for i in range(len(path) - 1):
+                    assert path[i].id < path[i + 1].id
+
+        def test_semantic_consistency(self, mock_vector):
+            """Test semantic consistency of paths"""
+            base_vector = mock_vector
+            for i in range(3):
+                evidence = base_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=0.8)
+                base_vector = evidence
+            
+            paths = self.tracker.get_trajectory_paths()
+            if paths:
+                path = paths[0]
+                for i in range(len(path) - 1):
+                    similarity = 1 - cosine(path[i].position, path[i + 1].position)
+                    assert similarity > 0.5
+
+        def test_confidence_consistency(self, mock_vector):
+            """Test confidence consistency of paths"""
+            confidences = [0.8, 0.9, 0.7]
+            for conf in confidences:
+                evidence = mock_vector + np.random.randn(768) * 0.1
+                evidence = evidence / np.linalg.norm(evidence)
+                self.tracker.update_trajectories(evidence, confidence=conf)
+            
+            paths = self.tracker.get_trajectory_paths()
+            if paths:
+                path = paths[0]
+                assert all(t.confidence >= self.tracker.min_confidence for t in path)
+
+    class TestMomentumBehavior:
+        """Tests for momentum behavior"""
+
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
+
+        def test_initial_state(self, mock_vector):
+            """Test initial momentum state"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            assert np.allclose(self.tracker.active_trajectories[0].momentum, 0)
+
+        def test_momentum_accumulation(self, mock_vector):
+            """Test momentum accumulation"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            initial_momentum = np.linalg.norm(self.tracker.active_trajectories[0].momentum)
+            
+            self.tracker.update_trajectories(-mock_vector, confidence=0.9)
+            final_momentum = np.linalg.norm(self.tracker.active_trajectories[0].momentum)
+            assert final_momentum > initial_momentum
+
+        def test_decay_rate(self, mock_vector):
+            """Test momentum decay rate"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            self.tracker.update_trajectories(-mock_vector, confidence=0.9)
+            
+            momentum_before = np.linalg.norm(self.tracker.active_trajectories[0].momentum)
+            self.tracker.update_trajectories(mock_vector, confidence=0.7)
+            momentum_after = np.linalg.norm(self.tracker.active_trajectories[0].momentum)
+            
+            expected_ratio = self.tracker.momentum_decay
+            actual_ratio = momentum_after / momentum_before
+            assert np.isclose(actual_ratio, expected_ratio, rtol=0.1)
+
+        def test_decay_direction(self, mock_vector):
+            """Test momentum decay direction preservation"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            self.tracker.update_trajectories(-mock_vector, confidence=0.9)
+            
+            trajectory = self.tracker.active_trajectories[0]
+            direction_before = trajectory.momentum / np.linalg.norm(trajectory.momentum)
+            
+            self.tracker.update_trajectories(mock_vector, confidence=0.7)
+            direction_after = trajectory.momentum / np.linalg.norm(trajectory.momentum)
+            assert np.allclose(direction_before, direction_after, rtol=0.1)
+
+    class TestTrajectoryMerging:
+        """Tests for trajectory merging"""
+
+        @pytest.fixture(autouse=True)
+        def setup_method(self, shared_momentum_tracker):
+            """Setup for each test method"""
+            self.tracker = shared_momentum_tracker
+            self.tracker.trajectories.clear()
+
+        def test_similar_trajectory_detection(self, mock_vector):
+            """Test detection of similar trajectories"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            similar_vector = mock_vector + np.random.randn(768) * 0.01
+            similar_vector = similar_vector / np.linalg.norm(similar_vector)
+            
+            similarity = 1 - cosine(mock_vector, similar_vector)
+            assert similarity > self.tracker.merge_threshold
+
+        def test_merge_count_reduction(self, mock_vector):
+            """Test trajectory count reduction after merging"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            similar_vector = mock_vector + np.random.randn(768) * 0.01
+            similar_vector = similar_vector / np.linalg.norm(similar_vector)
+            self.tracker.update_trajectories(similar_vector, confidence=0.7)
+            
+            merged_trajectories = [t for t in self.tracker.trajectories.values() 
+                                 if t.state == TrajectoryState.MERGED]
+            assert len(merged_trajectories) > 0
+
+        def test_merged_properties(self, mock_vector):
+            """Test properties after merging"""
+            self.tracker.update_trajectories(mock_vector, confidence=0.8)
+            similar_vector = mock_vector + np.random.randn(768) * 0.01
+            similar_vector = similar_vector / np.linalg.norm(similar_vector)
+            self.tracker.update_trajectories(similar_vector, confidence=0.7)
+            
+            active = self.tracker.active_trajectories[0]
+            assert active.confidence >= 0.8
+            assert active.state == TrajectoryState.ACTIVE
