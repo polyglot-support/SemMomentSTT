@@ -4,14 +4,33 @@ Text Decoder Module for SemMomentSTT
 This module handles the conversion of semantic trajectories into text:
 - Trajectory to token mapping
 - Context-aware decoding
-- Confidence-based filtering
+- Word-level confidence scoring
 """
 
 import torch
 import numpy as np
-from typing import List, Optional, Dict, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Tuple, NamedTuple
 from transformers import AutoTokenizer, AutoModelForMaskedLM
+import torch.nn.functional as F
 from ..semantic.momentum_tracker import SemanticTrajectory
+
+class WordScore(NamedTuple):
+    """Container for word-level scoring"""
+    word: str
+    confidence: float
+    semantic_similarity: float
+    language_model_score: float
+    start_time: float
+    duration: float
+
+@dataclass
+class DecodingResult:
+    """Container for decoding results"""
+    text: str
+    confidence: float
+    word_scores: List[WordScore]
+    trajectory_id: int
 
 class TextDecoder:
     def __init__(
@@ -19,7 +38,9 @@ class TextDecoder:
         model_name: str = "bert-base-uncased",
         device: Optional[str] = None,
         min_confidence: float = 0.3,
-        context_size: int = 5
+        context_size: int = 5,
+        lm_weight: float = 0.3,
+        semantic_weight: float = 0.7
     ):
         """
         Initialize the text decoder
@@ -29,10 +50,14 @@ class TextDecoder:
             device: Device to run the model on (cpu/cuda)
             min_confidence: Minimum confidence threshold for decoding
             context_size: Number of previous tokens to use for context
+            lm_weight: Weight for language model score
+            semantic_weight: Weight for semantic similarity score
         """
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.min_confidence = min_confidence
         self.context_size = context_size
+        self.lm_weight = lm_weight
+        self.semantic_weight = semantic_weight
         
         # Initialize tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -45,6 +70,7 @@ class TextDecoder:
         # Context management
         self.context_tokens: List[str] = []
         self.context_embeddings: List[np.ndarray] = []
+        self.word_history: List[WordScore] = []
     
     def _initialize_token_embeddings(self) -> torch.Tensor:
         """Initialize embeddings for all tokens in vocabulary"""
@@ -87,26 +113,26 @@ class TextDecoder:
             for idx, val in zip(indices, values)
         ]
     
-    def _apply_language_model(
+    def _compute_language_model_scores(
         self,
-        candidates: List[Tuple[str, float]]
-    ) -> List[Tuple[str, float]]:
+        candidates: List[Tuple[str, float]],
+        context: Optional[str] = None
+    ) -> List[Tuple[str, float, float]]:
         """
-        Apply language model scoring to candidate tokens
+        Compute language model scores for candidates
         
         Args:
             candidates: List of (token, similarity) pairs
+            context: Optional context string
             
         Returns:
-            Rescored candidates
+            List of (token, similarity, lm_score) tuples
         """
-        if not self.context_tokens:
-            return candidates
+        if not candidates:
+            return []
+            
+        context = context or " ".join(self.context_tokens[-self.context_size:])
         
-        # Create context string
-        context = " ".join(self.context_tokens[-self.context_size:])
-        
-        # Score each candidate
         scored_candidates = []
         with torch.no_grad():
             for token, sim in candidates:
@@ -124,29 +150,31 @@ class TextDecoder:
                 
                 # Get score for the candidate token
                 token_id = self.tokenizer.encode(token)[-1]
-                score = torch.softmax(
+                lm_score = torch.softmax(
                     logits[0, -1],
                     dim=0
                 )[token_id].item()
                 
-                # Combine similarity with language model score
-                final_score = 0.7 * sim + 0.3 * score
-                scored_candidates.append((token, final_score))
+                scored_candidates.append((token, sim, lm_score))
         
-        return sorted(scored_candidates, key=lambda x: x[1], reverse=True)
+        return scored_candidates
     
     def decode_trajectory(
         self,
-        trajectory: SemanticTrajectory
-    ) -> Optional[Tuple[str, float]]:
+        trajectory: SemanticTrajectory,
+        timestamp: float,
+        duration: float
+    ) -> Optional[DecodingResult]:
         """
-        Decode a semantic trajectory into text
+        Decode a semantic trajectory into text with word-level scoring
         
         Args:
             trajectory: Semantic trajectory to decode
+            timestamp: Current timestamp in seconds
+            duration: Duration of the current segment
             
         Returns:
-            Tuple of (decoded text, confidence) if successful
+            DecodingResult if successful
         """
         if trajectory.confidence < self.min_confidence:
             return None
@@ -155,28 +183,80 @@ class TextDecoder:
         candidates = self._find_nearest_tokens(trajectory.position)
         
         # Apply language model scoring
-        scored_candidates = self._apply_language_model(candidates)
+        scored_candidates = self._compute_language_model_scores(candidates)
         
         if scored_candidates:
-            best_token, score = scored_candidates[0]
+            # Get best candidate
+            word, semantic_sim, lm_score = scored_candidates[0]
+            
+            # Compute final confidence
+            confidence = (
+                self.semantic_weight * semantic_sim +
+                self.lm_weight * lm_score
+            ) * trajectory.confidence
+            
+            # Create word score
+            word_score = WordScore(
+                word=word,
+                confidence=confidence,
+                semantic_similarity=semantic_sim,
+                language_model_score=lm_score,
+                start_time=timestamp,
+                duration=duration
+            )
             
             # Update context
-            self.context_tokens.append(best_token)
+            self.context_tokens.append(word)
             self.context_embeddings.append(trajectory.position)
+            self.word_history.append(word_score)
             
             # Maintain context size
             if len(self.context_tokens) > self.context_size:
                 self.context_tokens.pop(0)
                 self.context_embeddings.pop(0)
             
-            return best_token, score * trajectory.confidence
+            # Maintain word history (keep last 100 words)
+            if len(self.word_history) > 100:
+                self.word_history.pop(0)
+            
+            return DecodingResult(
+                text=word,
+                confidence=confidence,
+                word_scores=[word_score],
+                trajectory_id=trajectory.id
+            )
         
         return None
+    
+    def get_word_history(
+        self,
+        time_window: Optional[float] = None
+    ) -> List[WordScore]:
+        """
+        Get word history with optional time window
+        
+        Args:
+            time_window: Optional time window in seconds
+            
+        Returns:
+            List of word scores
+        """
+        if time_window is None:
+            return self.word_history
+        
+        latest_time = self.word_history[-1].start_time if self.word_history else 0
+        cutoff_time = latest_time - time_window
+        
+        return [
+            score for score in self.word_history
+            if score.start_time >= cutoff_time
+        ]
     
     def reset_context(self):
         """Reset the decoding context"""
         self.context_tokens.clear()
         self.context_embeddings.clear()
+        self.word_history.clear()
     
     @property
     def context(self) -> str:
