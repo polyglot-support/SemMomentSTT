@@ -31,7 +31,9 @@
 - [x] Add audio resampling support
 - [x] Implement text decoding from trajectories
 - [x] Add word-level confidence scoring
-- [ ] Implement beam search for trajectories
+- [x] Implement beam search for trajectories
+- [ ] Add N-best list output
+- [ ] Optimize beam search parameters
 
 ### Initial Testing
 - [x] Set up test infrastructure
@@ -41,6 +43,7 @@
 - [x] Add sample rate conversion tests
 - [x] Add text decoder tests
 - [x] Add word-level confidence tests
+- [x] Add beam search integration tests
 - [ ] Add integration tests for full pipeline
 - [ ] Set up CI/CD pipeline
 - [ ] Add performance benchmarks
@@ -55,6 +58,7 @@
 - [x] Add visualization examples
 - [x] Document text decoding API
 - [x] Document word-level confidence API
+- [x] Document beam search functionality
 - [ ] Create full API reference
 - [ ] Write contributing guidelines
 
@@ -65,6 +69,7 @@
 - [x] Add audio processing error handling
 - [x] Add text decoding error handling
 - [x] Add word-level confidence validation
+- [x] Add beam search validation
 - [ ] Add code style enforcement
 - [ ] Set up performance benchmarks
 
@@ -100,6 +105,8 @@
 - [x] Integrate confidence scoring
 - [x] Add word-level confidence analysis
 - [x] Implement word history tracking
+- [x] Add beam search trajectory management
+- [x] Implement path reconstruction
 
 ## Blocked
 
@@ -124,6 +131,7 @@
 - [x] Implementation details
 - [x] Text decoding approach
 - [x] Confidence scoring method
+- [x] Beam search algorithm
 - [ ] Theoretical analysis
 - [ ] Complexity analysis
 
@@ -157,9 +165,10 @@
 - [x] Basic visualization
 - [x] Text decoding
 - [x] Word-level confidence
+- [x] Beam search
 
 ### Month 2
-- [ ] Beam search implementation
+- [ ] N-best list output
 - [ ] Performance optimization
 - [ ] Initial results
 - [ ] System evaluation
