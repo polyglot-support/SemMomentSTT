@@ -1,9 +1,13 @@
-"""
-Text Decoder Module for SemMomentSTT
+"""Text decoder module"""
 
-This module provides functionality for converting semantic trajectories into text.
-"""
+from .text_decoder import (
+    TextDecoder,
+    WordScore,
+    DecodingResult
+)
 
-from .text_decoder import TextDecoder
-
-__all__ = ['TextDecoder']
+__all__ = [
+    'TextDecoder',
+    'WordScore',
+    'DecodingResult'
+]

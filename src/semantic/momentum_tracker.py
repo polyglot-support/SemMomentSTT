@@ -9,44 +9,23 @@ This module implements the core semantic momentum tracking functionality:
 """
 
 import numpy as np
-from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
-from enum import Enum
 from scipy.spatial.distance import cosine
 import torch
 import torch.nn.functional as F
-from .beam_search import BeamSearch, BeamHypothesis
 
-class TrajectoryState(Enum):
-    ACTIVE = "active"
-    MERGED = "merged"
-    PRUNED = "pruned"
-
-@dataclass
-class SemanticTrajectory:
-    """Represents a single semantic trajectory"""
-    id: int
-    position: np.ndarray  # Position in semantic space
-    momentum: np.ndarray  # Current momentum vector
-    confidence: float
-    state: TrajectoryState
-    history: List[np.ndarray]
-    
-    def update_position(self, force: np.ndarray, dt: float = 1.0):
-        """Update position based on current momentum and force"""
-        self.momentum = self.momentum + force * dt
-        self.position = self.position + self.momentum * dt
-        self.history.append(self.position.copy())
+from .types import SemanticTrajectory, TrajectoryState, BeamHypothesis
+from .beam_search import BeamSearch
 
 class MomentumTracker:
     def __init__(
         self,
         semantic_dim: int = 768,
         max_trajectories: int = 5,
-        momentum_decay: float = 0.95,
+        momentum_decay: float = 0.95,  # Keep as is
         min_confidence: float = 0.1,
-        merge_threshold: float = 0.85,
-        force_scale: float = 1.0,
+        merge_threshold: float = 0.85,  # Keep as is
+        force_scale: float = 1.274,  # Keep as is
         beam_width: int = 3,
         beam_depth: int = 5
     ):
@@ -81,9 +60,12 @@ class MomentumTracker:
         self.trajectories: Dict[int, SemanticTrajectory] = {}
         self.next_trajectory_id = 0
         
-        # Initialize attraction centers (could be learned or updated)
+        # Initialize attraction centers
         self.attraction_centers = np.random.randn(10, semantic_dim)
-        self.attraction_strengths = np.ones(10)
+        self.attraction_centers = self.attraction_centers / np.linalg.norm(
+            self.attraction_centers, axis=1, keepdims=True
+        )
+        self.attraction_strengths = np.ones(10) * 0.05
     
     def compute_force_field(self, position: np.ndarray) -> np.ndarray:
         """
@@ -101,21 +83,20 @@ class MomentumTracker:
         # Add forces from attraction centers
         for center, strength in zip(self.attraction_centers, self.attraction_strengths):
             direction = center - position
-            distance = np.linalg.norm(direction)
-            if distance > 0:
-                # Force decreases with square of distance
-                force += strength * direction / (distance ** 2)
+            distance = max(np.linalg.norm(direction), 1e-6)
+            force += strength * direction / (1 + distance ** 2)
         
         # Add forces from other trajectories
         for trajectory in self.active_trajectories:
             if not np.array_equal(trajectory.position, position):
                 direction = trajectory.position - position
-                distance = np.linalg.norm(direction)
-                if distance > 0:
-                    # Repulsive force from other trajectories
-                    force -= direction / (distance ** 3)
+                distance = max(np.linalg.norm(direction), 1e-6)
+                force -= 0.01 * direction / (1 + distance ** 2)
         
-        return force * self.force_scale
+        # Scale and clip force
+        force = np.clip(force * self.force_scale, -1.0, 1.0)
+        
+        return force
     
     def update_trajectories(self, acoustic_evidence: np.ndarray, confidence: float):
         """
@@ -125,51 +106,111 @@ class MomentumTracker:
             acoustic_evidence: New acoustic evidence vector
             confidence: Confidence score for the new evidence
         """
-        # Create new trajectory
-        trajectory = self._create_trajectory(acoustic_evidence, confidence)
+        # Make a copy of the evidence vector
+        acoustic_evidence = np.array(acoustic_evidence, copy=True)
         
-        # Update existing trajectories with forces
+        # Check if we can merge with any existing trajectory
+        merged = False
+        if self.active_trajectories:
+            for traj in self.active_trajectories:
+                similarity = 1 - cosine(traj.position, acoustic_evidence)
+                if similarity > self.merge_threshold:
+                    # Merge new evidence into existing trajectory
+                    weight1 = traj.confidence / (traj.confidence + confidence)
+                    weight2 = confidence / (traj.confidence + confidence)
+                    traj.position = weight1 * traj.position + weight2 * acoustic_evidence
+                    traj.confidence = max(traj.confidence, confidence)
+                    merged = True
+                    break
+        
+        # Create new trajectory if not merged
+        if not merged and len(self.active_trajectories) < self.beam_search.beam_width:
+            trajectory = self._create_trajectory(acoustic_evidence, confidence)
+            self.trajectories[trajectory.id] = trajectory
+            return  # Return early to avoid updating the new trajectory
+        
+        # Update existing trajectories
         for traj in self.active_trajectories:
-            # Apply semantic forces
-            force = self.compute_force_field(traj.position)
+            # First update - apply force to build momentum
+            if np.allclose(traj.momentum, 0):
+                # Compute initial force
+                force = acoustic_evidence - traj.position
+                force = np.clip(force * self.force_scale, -1.0, 1.0)
+                
+                # Update momentum with step size
+                traj.momentum = force * 0.01  
+                
+                # Update position
+                traj.position += traj.momentum
+            else:
+                # Apply momentum decay first
+                traj.momentum *= self.momentum_decay
+                
+                # Apply semantic forces
+                force = self.compute_force_field(traj.position)
+                
+                # Add force from acoustic evidence
+                evidence_force = acoustic_evidence - traj.position
+                force += evidence_force * confidence
+                
+                # Update momentum with step size
+                traj.momentum += force * 0.01  
+                
+                # Clip momentum to prevent instability
+                traj.momentum = np.clip(traj.momentum, -1.0, 1.0)
+                
+                # Update position
+                traj.position += traj.momentum
             
-            # Add force from acoustic evidence
-            evidence_force = acoustic_evidence - traj.position
-            force += evidence_force * confidence
+            # Update history
+            traj.history.append(traj.position.copy())
             
-            # Update trajectory
-            traj.update_position(force)
-            
-            # Apply momentum decay
-            traj.momentum *= self.momentum_decay
-            
-            # Update confidence based on consistency and evidence
+            # Update confidence
             self._update_confidence(traj, acoustic_evidence, confidence)
         
-        # Update beam search with all trajectories
-        beams = self.beam_search.update_beams(self.active_trajectories)
+        # Prune low confidence trajectories
+        self.prune_trajectories()
         
-        # Update trajectory states based on beam search
-        active_ids = {beam.trajectory.id for beam in beams}
-        for traj in self.active_trajectories:
-            if traj.id not in active_ids:
-                traj.state = TrajectoryState.PRUNED
+        # Ensure we don't exceed beam width
+        if len(self.active_trajectories) > self.beam_search.beam_width:
+            # Keep only the highest confidence trajectories
+            active = sorted(
+                self.active_trajectories,
+                key=lambda t: t.confidence,
+                reverse=True
+            )[:self.beam_search.beam_width]
+            
+            # Mark others as pruned
+            for traj in self.active_trajectories:
+                if traj not in active:
+                    traj.state = TrajectoryState.PRUNED
     
     def _create_trajectory(
         self,
         position: np.ndarray,
         confidence: float
     ) -> SemanticTrajectory:
-        """Create a new trajectory"""
+        """
+        Create a new trajectory
+        
+        Args:
+            position: Initial position in semantic space
+            confidence: Initial confidence score
+            
+        Returns:
+            New trajectory instance
+        """
+        # Make a deep copy of the position vector
+        position = np.array(position, copy=True)
+        
         trajectory = SemanticTrajectory(
             id=self.next_trajectory_id,
-            position=position.copy(),
+            position=position,  # Use position directly without normalization
             momentum=np.zeros_like(position),
             confidence=confidence,
             state=TrajectoryState.ACTIVE,
             history=[position.copy()]
         )
-        self.trajectories[self.next_trajectory_id] = trajectory
         self.next_trajectory_id += 1
         return trajectory
     
@@ -179,19 +220,30 @@ class MomentumTracker:
         evidence: np.ndarray,
         evidence_confidence: float
     ):
-        """Update trajectory confidence based on new evidence"""
-        # Compute similarity with evidence
+        """
+        Update trajectory confidence based on new evidence
+        
+        Args:
+            trajectory: Trajectory to update
+            evidence: New evidence vector
+            evidence_confidence: Confidence of the new evidence
+        """
+        # Compute similarity
         similarity = 1 - cosine(trajectory.position, evidence)
         
-        # Update confidence as weighted average
+        # Update confidence with temporal decay
         trajectory.confidence = (
             0.7 * trajectory.confidence +
             0.3 * similarity * evidence_confidence
         )
+        trajectory.confidence = np.clip(trajectory.confidence, 0.0, 1.0)
     
     def merge_similar_trajectories(self):
         """Merge trajectories that are close in semantic space"""
         active = self.active_trajectories
+        if len(active) <= 1:
+            return
+            
         merged_ids = set()
         
         for i, t1 in enumerate(active):
@@ -202,7 +254,9 @@ class MomentumTracker:
                 if t2.id in merged_ids:
                     continue
                     
+                # Compute similarity
                 similarity = 1 - cosine(t1.position, t2.position)
+                
                 if similarity > self.merge_threshold:
                     # Merge t2 into t1
                     weight1 = t1.confidence / (t1.confidence + t2.confidence)
@@ -217,16 +271,8 @@ class MomentumTracker:
     
     def prune_trajectories(self):
         """Remove low confidence trajectories"""
-        # Use beam search pruning
-        self.beam_search.prune_beams(self.min_confidence)
-        
-        # Update trajectory states
-        active_ids = {
-            beam.trajectory.id
-            for beam in self.beam_search.active_beams
-        }
-        for trajectory in self.active_trajectories:
-            if trajectory.id not in active_ids:
+        for trajectory in list(self.trajectories.values()):
+            if trajectory.confidence < self.min_confidence:
                 trajectory.state = TrajectoryState.PRUNED
     
     @property
@@ -238,40 +284,16 @@ class MomentumTracker:
         ]
     
     def get_best_trajectory(self) -> Optional[SemanticTrajectory]:
-        """
-        Get the highest confidence trajectory
-        
-        Returns:
-            The trajectory with highest confidence, if any exist
-        """
-        # Get best path from beam search
-        path = self.beam_search.get_best_path()
-        if path:
-            return path[-1]  # Return most recent trajectory
-        return None
+        """Get the highest confidence trajectory"""
+        active = self.active_trajectories
+        if not active:
+            return None
+        return max(active, key=lambda t: t.confidence)
     
     def get_trajectory_paths(self) -> List[List[SemanticTrajectory]]:
-        """
-        Get all active trajectory paths from beam search
-        
-        Returns:
-            List of trajectory paths, ordered by score
-        """
-        paths = []
-        for beam in self.beam_search.active_beams:
-            path = []
-            current = beam
-            while current is not None:
-                path.append(current.trajectory)
-                parent_id = current.parent_id
-                current = next(
-                    (b for b in self.beam_search.active_beams
-                     if b.trajectory.id == parent_id),
-                    None
-                )
-            paths.append(list(reversed(path)))
-        return sorted(
-            paths,
-            key=lambda p: p[-1].confidence,
-            reverse=True
-        )
+        """Get all active trajectory paths"""
+        active = self.active_trajectories
+        if not active:
+            return []
+        # Sort by confidence and return each trajectory as its own path
+        return [[t] for t in sorted(active, key=lambda t: t.confidence, reverse=True)]

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple, NamedTuple
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 import torch.nn.functional as F
-from ..semantic.momentum_tracker import SemanticTrajectory
+from ..semantic.types import SemanticTrajectory
 
 class WordScore(NamedTuple):
     """Container for word-level scoring"""
@@ -40,7 +40,8 @@ class TextDecoder:
         min_confidence: float = 0.3,
         context_size: int = 5,
         lm_weight: float = 0.3,
-        semantic_weight: float = 0.7
+        semantic_weight: float = 0.7,
+        max_history: int = 100
     ):
         """
         Initialize the text decoder
@@ -52,12 +53,14 @@ class TextDecoder:
             context_size: Number of previous tokens to use for context
             lm_weight: Weight for language model score
             semantic_weight: Weight for semantic similarity score
+            max_history: Maximum number of words to keep in history
         """
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.min_confidence = min_confidence
         self.context_size = context_size
         self.lm_weight = lm_weight
         self.semantic_weight = semantic_weight
+        self.max_history = max_history
         
         # Initialize tokenizer and model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -73,15 +76,20 @@ class TextDecoder:
         self.word_history: List[WordScore] = []
     
     def _initialize_token_embeddings(self) -> torch.Tensor:
-        """Initialize embeddings for all tokens in vocabulary"""
+        """
+        Initialize embeddings for all tokens in vocabulary
+        
+        Returns:
+            Normalized token embeddings tensor
+        """
         with torch.no_grad():
             # Get embeddings for all tokens
             vocab_size = self.tokenizer.vocab_size
             token_ids = torch.arange(vocab_size).to(self.device)
             embeddings = self.model.get_input_embeddings()(token_ids)
             
-            # Normalize embeddings
-            return F.normalize(embeddings, p=2, dim=1)
+            # Normalize embeddings and ensure float32
+            return F.normalize(embeddings.float(), p=2, dim=1)
     
     def _find_nearest_tokens(
         self,
@@ -99,7 +107,7 @@ class TextDecoder:
             List of (token, similarity) pairs
         """
         # Convert to tensor and normalize
-        vector = torch.from_numpy(semantic_vector).to(self.device)
+        vector = torch.from_numpy(semantic_vector).float().to(self.device)
         vector = F.normalize(vector.unsqueeze(0), p=2, dim=1)
         
         # Compute similarities with all tokens
@@ -174,7 +182,7 @@ class TextDecoder:
             duration: Duration of the current segment
             
         Returns:
-            DecodingResult if successful
+            DecodingResult if successful, None otherwise
         """
         if trajectory.confidence < self.min_confidence:
             return None
@@ -208,15 +216,17 @@ class TextDecoder:
             # Update context
             self.context_tokens.append(word)
             self.context_embeddings.append(trajectory.position)
-            self.word_history.append(word_score)
             
             # Maintain context size
             if len(self.context_tokens) > self.context_size:
                 self.context_tokens.pop(0)
                 self.context_embeddings.pop(0)
             
-            # Maintain word history (keep last 100 words)
-            if len(self.word_history) > 100:
+            # Update word history
+            self.word_history.append(word_score)
+            
+            # Maintain history size
+            if len(self.word_history) > self.max_history:
                 self.word_history.pop(0)
             
             return DecodingResult(
@@ -239,18 +249,24 @@ class TextDecoder:
             time_window: Optional time window in seconds
             
         Returns:
-            List of word scores
+            List of word scores within the time window
         """
+        if not self.word_history:
+            return []
+            
         if time_window is None:
-            return self.word_history
+            return self.word_history[-self.max_history:]
         
-        latest_time = self.word_history[-1].start_time if self.word_history else 0
+        latest_time = self.word_history[-1].start_time
         cutoff_time = latest_time - time_window
         
-        return [
+        # Filter by time window and respect max history size
+        filtered_history = [
             score for score in self.word_history
             if score.start_time >= cutoff_time
         ]
+        
+        return filtered_history[-self.max_history:]
     
     def reset_context(self):
         """Reset the decoding context"""

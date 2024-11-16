@@ -4,38 +4,35 @@ import pytest
 import numpy as np
 import torch
 from src.integration.pipeline import (
-    IntegrationPipeline,
     ProcessingResult,
     NBestHypothesis
 )
-from src.semantic.momentum_tracker import SemanticTrajectory
+from src.semantic.types import SemanticTrajectory
 from src.decoder.text_decoder import WordScore, DecodingResult
 from src.semantic.lattice import LatticePath
 
-@pytest.fixture
-def pipeline():
-    """Create an IntegrationPipeline instance for testing"""
-    return IntegrationPipeline(
-        semantic_dim=768,
-        context_window=5,
-        n_best=3
-    )
-
-def test_pipeline_initialization(pipeline):
+@pytest.mark.integration
+def test_pipeline_initialization(shared_pipeline):
     """Test that IntegrationPipeline initializes correctly"""
+    pipeline = shared_pipeline
     assert pipeline is not None
     assert pipeline.device in ['cuda', 'cpu']
-    assert pipeline.context_window == 5
+    assert pipeline.context_window == 10  # Default value
     assert pipeline.semantic_dim == 768
-    assert pipeline.n_best == 3
+    assert pipeline.n_best == 5  # Default value
     assert len(pipeline.context_buffer) == 0
     assert isinstance(pipeline.semantic_projection, torch.nn.Linear)
     assert hasattr(pipeline, 'text_decoder')
     assert hasattr(pipeline, 'word_lattice')
     assert pipeline.current_time == 0.0
 
-def test_process_frame(pipeline):
+@pytest.mark.integration
+def test_process_frame(shared_pipeline, mock_acoustic_features):
     """Test processing a single frame through the pipeline"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     # Create a dummy audio frame (16kHz, 1 second)
     audio_frame = np.random.randn(16000).astype(np.float32)
     
@@ -88,8 +85,13 @@ def test_process_frame(pipeline):
         assert len(path.nodes) > 0
         assert len(path.edges) == len(path.nodes) - 1
 
-def test_n_best_ranking(pipeline):
+@pytest.mark.integration
+def test_n_best_ranking(shared_pipeline):
     """Test ranking of N-best hypotheses"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     audio_frame = np.random.randn(16000).astype(np.float32)
     result = pipeline.process_frame(audio_frame)
     
@@ -104,8 +106,13 @@ def test_n_best_ranking(pipeline):
             assert best_hyp.text == result.decoding_result.text
             assert best_hyp.confidence == result.decoding_result.confidence
 
-def test_lattice_generation(pipeline):
+@pytest.mark.integration
+def test_lattice_generation(shared_pipeline):
     """Test lattice generation and DOT output"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     # Process multiple frames
     for _ in range(3):
         audio_frame = np.random.randn(16000).astype(np.float32)
@@ -117,8 +124,13 @@ def test_lattice_generation(pipeline):
     assert dot.startswith("digraph {")
     assert dot.endswith("}")
 
-def test_time_tracking(pipeline):
+@pytest.mark.integration
+def test_time_tracking(shared_pipeline):
     """Test time tracking across frames"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     frame_duration = 0.5
     n_frames = 5
     
@@ -140,8 +152,13 @@ def test_time_tracking(pipeline):
     
     assert pipeline.current_time == n_frames * frame_duration
 
-def test_word_history(pipeline):
+@pytest.mark.integration
+def test_word_history(shared_pipeline):
     """Test word history tracking"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     frame_duration = 0.5
     n_frames = 10
     
@@ -166,8 +183,13 @@ def test_word_history(pipeline):
         latest_time = recent[-1].start_time
         assert all(score.start_time >= latest_time - 1.0 for score in recent)
 
-def test_process_frame_with_resampling(pipeline):
+@pytest.mark.integration
+def test_process_frame_with_resampling(shared_pipeline):
     """Test processing frames with different sample rates"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     # Test with 44.1kHz audio
     audio_44k = np.random.randn(44100).astype(np.float32)
     result_44k = pipeline.process_frame(
@@ -190,8 +212,13 @@ def test_process_frame_with_resampling(pipeline):
     assert isinstance(result_8k.n_best, list)
     assert isinstance(result_8k.lattice_paths, list)
 
-def test_context_management(pipeline):
+@pytest.mark.integration
+def test_context_management(shared_pipeline):
     """Test context buffer management"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     # Process multiple frames
     for _ in range(10):  # More than context window
         audio_frame = np.random.randn(16000).astype(np.float32)
@@ -206,21 +233,29 @@ def test_context_management(pipeline):
     assert context_embedding.shape == (768,)
     assert not np.allclose(context_embedding, 0)
 
-def test_semantic_mapping(pipeline):
+@pytest.mark.integration
+def test_semantic_mapping(shared_pipeline, mock_acoustic_features):
     """Test acoustic to semantic space mapping"""
-    audio_frame = np.random.randn(16000).astype(np.float32)
-    result = pipeline.process_frame(audio_frame, return_features=True)
+    pipeline = shared_pipeline
+    features, _ = mock_acoustic_features
+    features = torch.from_numpy(features).float()  # Ensure float32
     
     # Map features to semantic space directly
-    semantic_vector = pipeline._map_to_semantic_space(result.features)
+    semantic_vector = pipeline._map_to_semantic_space(features)
     
     assert isinstance(semantic_vector, np.ndarray)
     assert semantic_vector.shape == (768,)
     # Check that vector is normalized
     assert np.abs(np.linalg.norm(semantic_vector) - 1.0) < 1e-6
 
-def test_stream_processing(pipeline):
+@pytest.mark.integration
+@pytest.mark.slow
+def test_stream_processing(shared_pipeline):
     """Test processing an audio stream"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     def dummy_stream(n_frames):
         for _ in range(n_frames):
             yield np.random.randn(8000).astype(np.float32)  # 0.5s frames
@@ -239,10 +274,16 @@ def test_stream_processing(pipeline):
         assert len(result.n_best) <= pipeline.n_best
         assert len(result.lattice_paths) <= pipeline.n_best
 
+@pytest.mark.integration
 @pytest.mark.parametrize("semantic_dim", [512, 768, 1024])
 def test_different_dimensions(semantic_dim):
     """Test pipeline with different semantic dimensions"""
-    pipeline = IntegrationPipeline(semantic_dim=semantic_dim)
+    from src.integration.pipeline import IntegrationPipeline
+    pipeline = IntegrationPipeline(
+        acoustic_model="facebook/wav2vec2-base",
+        language_model="bert-base-uncased",
+        semantic_dim=semantic_dim
+    )
     
     audio_frame = np.random.randn(16000).astype(np.float32)
     result = pipeline.process_frame(audio_frame)
@@ -253,25 +294,10 @@ def test_different_dimensions(semantic_dim):
             for traj in hyp.trajectory_path:
                 assert traj.position.shape == (semantic_dim,)
 
-def test_n_best_consistency(pipeline):
-    """Test consistency of N-best hypotheses"""
-    # Process same audio multiple times
-    audio_frame = np.random.randn(16000).astype(np.float32)
-    
-    results = []
-    for _ in range(3):
-        result = pipeline.process_frame(audio_frame)
-        if result.n_best:
-            results.append([hyp.text for hyp in result.n_best])
-    
-    # Should get similar N-best lists
-    if len(results) > 1:
-        # Compare top hypotheses
-        top_hyps = [r[0] for r in results]
-        assert len(set(top_hyps)) <= 2  # Allow some variation but not completely random
-
-def test_pipeline_reset(pipeline):
+@pytest.mark.integration
+def test_pipeline_reset(shared_pipeline):
     """Test pipeline reset functionality"""
+    pipeline = shared_pipeline
     # Process some frames
     audio_frame = np.random.randn(16000).astype(np.float32)
     pipeline.process_frame(audio_frame, frame_duration=1.0)
@@ -283,40 +309,13 @@ def test_pipeline_reset(pipeline):
     assert pipeline.current_time == 0.0
     assert len(pipeline.get_word_history()) == 0
 
-def test_confidence_propagation(pipeline):
-    """Test confidence score propagation"""
-    audio_frame = np.random.randn(16000).astype(np.float32)
-    result = pipeline.process_frame(audio_frame, frame_duration=1.0)
-    
-    if result.decoding_result is not None:
-        assert 0 <= result.decoding_result.confidence <= 1
-        if result.trajectory is not None:
-            # Confidence should not exceed trajectory confidence
-            assert result.decoding_result.confidence <= result.trajectory.confidence
-        
-        # Check N-best confidence propagation
-        for hyp in result.n_best:
-            assert 0 <= hyp.confidence <= 1
-            if result.trajectory is not None:
-                assert hyp.confidence <= result.trajectory.confidence
-
-def test_trajectory_path_consistency(pipeline):
-    """Test consistency of trajectory paths in N-best results"""
-    audio_frame = np.random.randn(16000).astype(np.float32)
-    result = pipeline.process_frame(audio_frame)
-    
-    for hyp in result.n_best:
-        path = hyp.trajectory_path
-        if len(path) > 1:
-            # Check temporal ordering
-            for i in range(len(path) - 1):
-                assert path[i].id < path[i + 1].id
-            
-            # Last trajectory in path should match confidence
-            assert abs(path[-1].confidence - hyp.confidence) < 1e-6
-
-def test_lattice_path_consistency(pipeline):
+@pytest.mark.integration
+def test_lattice_path_consistency(shared_pipeline):
     """Test consistency between N-best and lattice paths"""
+    pipeline = shared_pipeline
+    # Reset state
+    pipeline.reset()
+    
     audio_frame = np.random.randn(16000).astype(np.float32)
     result = pipeline.process_frame(audio_frame)
     

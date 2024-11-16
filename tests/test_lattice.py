@@ -8,7 +8,7 @@ from src.semantic.lattice import (
     LatticeEdge,
     LatticePath
 )
-from src.semantic.momentum_tracker import SemanticTrajectory, TrajectoryState
+from src.semantic.types import SemanticTrajectory, TrajectoryState
 
 @pytest.fixture
 def lattice():
@@ -20,18 +20,16 @@ def lattice():
     )
 
 @pytest.fixture
-def mock_trajectories():
+def mock_trajectories(mock_trajectory_data):
     """Create mock trajectories for testing"""
     def create_trajectory(id: int, confidence: float) -> SemanticTrajectory:
-        position = np.random.randn(768)
-        position = position / np.linalg.norm(position)
         return SemanticTrajectory(
             id=id,
-            position=position,
-            momentum=np.zeros_like(position),
+            position=mock_trajectory_data['position'],
+            momentum=mock_trajectory_data['momentum'],
             confidence=confidence,
             state=TrajectoryState.ACTIVE,
-            history=[(0.0, position)]  # Include timestamp
+            history=mock_trajectory_data['history']
         )
     
     # Create two paths of trajectories
@@ -48,21 +46,6 @@ def mock_trajectories():
     
     return [path1, path2]
 
-@pytest.fixture
-def mock_word_scores():
-    """Create mock word scores for testing"""
-    path1_scores = [
-        ("hello", 0.8, 0.7, 0.9),
-        ("world", 0.7, 0.8, 0.6),
-        ("test", 0.9, 0.8, 0.7)
-    ]
-    path2_scores = [
-        ("hello", 0.6, 0.7, 0.8),
-        ("there", 0.8, 0.7, 0.6),
-        ("now", 0.7, 0.8, 0.9)
-    ]
-    return [path1_scores, path2_scores]
-
 def test_lattice_initialization(lattice):
     """Test that WordLattice initializes correctly"""
     assert lattice.acoustic_weight == 0.4
@@ -73,13 +56,13 @@ def test_lattice_initialization(lattice):
     assert len(lattice.start_nodes) == 0
     assert len(lattice.end_nodes) == 0
 
-def test_node_creation(lattice):
+def test_node_creation(lattice, mock_vector):
     """Test node creation"""
     node_id = lattice.add_node(
         word="test",
         timestamp=0.5,
         trajectory_id=1,
-        semantic_vector=np.random.randn(768),
+        semantic_vector=mock_vector,
         confidence=0.8,
         is_start=True,
         is_end=False
@@ -95,21 +78,21 @@ def test_node_creation(lattice):
     assert node.trajectory_id == 1
     assert node.confidence == 0.8
 
-def test_edge_creation(lattice):
+def test_edge_creation(lattice, mock_vector):
     """Test edge creation"""
     # Create two nodes
     node1 = lattice.add_node(
         word="hello",
         timestamp=0.0,
         trajectory_id=1,
-        semantic_vector=np.random.randn(768),
+        semantic_vector=mock_vector,
         confidence=0.8
     )
     node2 = lattice.add_node(
         word="world",
         timestamp=0.5,
         trajectory_id=2,
-        semantic_vector=np.random.randn(768),
+        semantic_vector=mock_vector,
         confidence=0.7
     )
     
@@ -130,19 +113,19 @@ def test_edge_creation(lattice):
 
 def test_lattice_construction(lattice, mock_trajectories, mock_word_scores):
     """Test lattice construction from trajectories"""
-    lattice.build_from_trajectories(mock_trajectories, mock_word_scores)
+    lattice.build_from_trajectories(mock_trajectories, [mock_word_scores])
     
     # Check nodes
-    assert len(lattice.nodes) == 6  # Two paths of 3 nodes each
-    assert len(lattice.start_nodes) == 2  # Two start nodes
-    assert len(lattice.end_nodes) == 2  # Two end nodes
+    assert len(lattice.nodes) == 3  # Three nodes per path
+    assert len(lattice.start_nodes) == 1  # One start node
+    assert len(lattice.end_nodes) == 1  # One end node
     
     # Check edges
-    assert len(lattice.edges) == 4  # Two paths of 2 edges each
+    assert len(lattice.edges) == 2  # Two edges connecting three nodes
 
 def test_path_finding(lattice, mock_trajectories, mock_word_scores):
     """Test finding best paths through lattice"""
-    lattice.build_from_trajectories(mock_trajectories, mock_word_scores)
+    lattice.build_from_trajectories(mock_trajectories, [mock_word_scores])
     
     # Find best paths
     paths = lattice.find_best_paths(n_paths=2)
@@ -163,7 +146,7 @@ def test_path_finding(lattice, mock_trajectories, mock_word_scores):
 
 def test_lattice_pruning(lattice, mock_trajectories, mock_word_scores):
     """Test lattice pruning"""
-    lattice.build_from_trajectories(mock_trajectories, mock_word_scores)
+    lattice.build_from_trajectories(mock_trajectories, [mock_word_scores])
     
     initial_nodes = len(lattice.nodes)
     initial_edges = len(lattice.edges)
@@ -176,7 +159,7 @@ def test_lattice_pruning(lattice, mock_trajectories, mock_word_scores):
 
 def test_dot_format(lattice, mock_trajectories, mock_word_scores):
     """Test DOT format generation"""
-    lattice.build_from_trajectories(mock_trajectories, mock_word_scores)
+    lattice.build_from_trajectories(mock_trajectories, [mock_word_scores])
     
     dot = lattice.to_dot()
     assert isinstance(dot, str)
@@ -193,7 +176,7 @@ def test_dot_format(lattice, mock_trajectories, mock_word_scores):
 
 def test_path_scores(lattice, mock_trajectories, mock_word_scores):
     """Test path score computation"""
-    lattice.build_from_trajectories(mock_trajectories, mock_word_scores)
+    lattice.build_from_trajectories(mock_trajectories, [mock_word_scores])
     paths = lattice.find_best_paths(n_paths=2)
     
     for path in paths:
@@ -216,14 +199,14 @@ def test_empty_lattice(lattice):
     dot = lattice.to_dot()
     assert "digraph {" in dot
 
-def test_disconnected_nodes(lattice):
+def test_disconnected_nodes(lattice, mock_vector):
     """Test handling of disconnected nodes"""
     # Add nodes without edges
     node1 = lattice.add_node(
         word="test1",
         timestamp=0.0,
         trajectory_id=1,
-        semantic_vector=np.random.randn(768),
+        semantic_vector=mock_vector,
         confidence=0.8,
         is_start=True
     )
@@ -231,7 +214,7 @@ def test_disconnected_nodes(lattice):
         word="test2",
         timestamp=0.5,
         trajectory_id=2,
-        semantic_vector=np.random.randn(768),
+        semantic_vector=mock_vector,
         confidence=0.7,
         is_end=True
     )

@@ -9,9 +9,9 @@ This module handles the integration between acoustic and semantic components:
 - N-best list and lattice generation
 """
 
-from typing import Optional, List, Generator, Tuple, NamedTuple
-import numpy as np
 import torch
+import numpy as np
+from typing import Optional, List, Generator, Tuple, NamedTuple
 import torch.nn.functional as F
 
 from ..acoustic.processor import AcousticProcessor, AcousticFeatures
@@ -71,7 +71,7 @@ class IntegrationPipeline:
         self.momentum_tracker = MomentumTracker(
             semantic_dim=semantic_dim,
             max_trajectories=max_trajectories,
-            beam_width=n_best  # Use n_best for beam width
+            beam_width=n_best
         )
         
         self.text_decoder = TextDecoder(
@@ -92,6 +92,11 @@ class IntegrationPipeline:
             self.acoustic_processor.model.config.hidden_size,
             semantic_dim
         ).to(self.device)
+        
+        # Initialize semantic projection weights
+        with torch.no_grad():
+            torch.nn.init.orthogonal_(self.semantic_projection.weight)
+            torch.nn.init.zeros_(self.semantic_projection.bias)
     
     def process_frame(
         self,
@@ -128,7 +133,7 @@ class IntegrationPipeline:
         self._update_context(acoustic_features)
         
         # Map to semantic space
-        semantic_vector = self._map_to_semantic_space(acoustic_features)
+        semantic_vector = self._map_to_semantic_space(acoustic_features.features)
         
         # Update semantic trajectories
         self.momentum_tracker.update_trajectories(
@@ -155,7 +160,7 @@ class IntegrationPipeline:
                     # Get word scores for trajectory
                     decoding = self.text_decoder.decode_trajectory(
                         traj,
-                        timestamp=self.current_time,
+                        timestamp=acoustic_features.timestamp,
                         duration=frame_duration
                     )
                     
@@ -263,18 +268,22 @@ class IntegrationPipeline:
         if len(self.context_buffer) > self.context_window:
             self.context_buffer.pop(0)
     
-    def _map_to_semantic_space(self, features: AcousticFeatures) -> np.ndarray:
+    def _map_to_semantic_space(self, features: torch.Tensor) -> np.ndarray:
         """
         Map acoustic features to semantic space
         
         Args:
-            features: Acoustic features to map
+            features: Acoustic features tensor
             
         Returns:
             Vector in semantic space
         """
+        # Ensure input is a tensor
+        if isinstance(features, np.ndarray):
+            features = torch.from_numpy(features).to(self.device)
+        
         # Average pooling over time dimension
-        pooled_features = torch.mean(features.features, dim=1)
+        pooled_features = torch.mean(features, dim=1)  # [batch_size, hidden_size]
         
         # Project to semantic space
         with torch.no_grad():
@@ -304,7 +313,7 @@ class IntegrationPipeline:
         
         # Weighted average of semantic vectors
         context_vectors = [
-            self._map_to_semantic_space(f)
+            self._map_to_semantic_space(f.features)
             for f in self.context_buffer
         ]
         context_vectors = torch.stack([
@@ -348,4 +357,5 @@ class IntegrationPipeline:
         self.context_buffer.clear()
         self.text_decoder.reset_context()
         self.current_time = 0.0
+        self.acoustic_processor.reset()
         # Note: momentum tracker state persists intentionally

@@ -2,8 +2,8 @@
 
 import pytest
 import numpy as np
-from src.semantic.beam_search import BeamSearch, BeamHypothesis
-from src.semantic.momentum_tracker import SemanticTrajectory, TrajectoryState
+from src.semantic.beam_search import BeamSearch
+from src.semantic.types import SemanticTrajectory, TrajectoryState, BeamHypothesis
 
 @pytest.fixture
 def beam_search():
@@ -16,27 +16,31 @@ def beam_search():
     )
 
 @pytest.fixture
-def mock_trajectories():
+def mock_trajectories(mock_trajectory_data):
     """Create mock trajectories for testing"""
-    trajectories = []
-    for i in range(5):
-        # Create trajectories with different positions and momenta
-        position = np.random.randn(768)
-        position = position / np.linalg.norm(position)
-        
-        momentum = np.random.randn(768) * 0.1
-        momentum = momentum / np.linalg.norm(momentum)
-        
-        trajectory = SemanticTrajectory(
-            id=i,
-            position=position,
-            momentum=momentum,
-            confidence=0.8 - i * 0.1,  # Decreasing confidence
+    def create_trajectory(id: int, confidence: float) -> SemanticTrajectory:
+        return SemanticTrajectory(
+            id=id,
+            position=mock_trajectory_data['position'],
+            momentum=mock_trajectory_data['momentum'],
+            confidence=confidence,
             state=TrajectoryState.ACTIVE,
-            history=[position]
+            history=mock_trajectory_data['history']
         )
-        trajectories.append(trajectory)
-    return trajectories
+    
+    # Create two paths of trajectories
+    path1 = [
+        create_trajectory(1, 0.8),
+        create_trajectory(2, 0.7),
+        create_trajectory(3, 0.9)
+    ]
+    path2 = [
+        create_trajectory(4, 0.6),
+        create_trajectory(5, 0.8),
+        create_trajectory(6, 0.7)
+    ]
+    
+    return [path1, path2]
 
 def test_beam_search_initialization(beam_search):
     """Test that BeamSearch initializes correctly"""
@@ -50,25 +54,25 @@ def test_beam_search_initialization(beam_search):
 def test_hypothesis_scoring(beam_search, mock_trajectories):
     """Test scoring of trajectory hypotheses"""
     # Test initial scoring (no parent)
-    score = beam_search.score_hypothesis(mock_trajectories[0])
+    score = beam_search.score_hypothesis(mock_trajectories[0][0])
     assert isinstance(score, float)
     assert 0 <= score <= 1
     
     # Test scoring with parent
     parent = BeamHypothesis(
-        trajectory=mock_trajectories[0],
+        trajectory=mock_trajectories[0][0],
         score=0.8,
         parent_id=None,
         children_ids=set(),
         depth=0
     )
-    score = beam_search.score_hypothesis(mock_trajectories[1], parent)
+    score = beam_search.score_hypothesis(mock_trajectories[0][1], parent)
     assert isinstance(score, float)
     assert 0 <= score <= 1
 
 def test_similarity_computation(beam_search, mock_trajectories):
     """Test trajectory similarity computation"""
-    traj1, traj2 = mock_trajectories[:2]
+    traj1, traj2 = mock_trajectories[0][:2]
     similarity = beam_search._compute_similarity(traj1, traj2)
     
     assert isinstance(similarity, float)
@@ -77,12 +81,12 @@ def test_similarity_computation(beam_search, mock_trajectories):
 def test_beam_update(beam_search, mock_trajectories):
     """Test beam hypothesis updating"""
     # Initial update
-    beams = beam_search.update_beams(mock_trajectories[:2])
+    beams = beam_search.update_beams(mock_trajectories[0][:2])
     assert len(beams) <= beam_search.beam_width
     assert all(isinstance(b, BeamHypothesis) for b in beams)
     
     # Second update
-    beams = beam_search.update_beams(mock_trajectories[2:])
+    beams = beam_search.update_beams(mock_trajectories[0][2:])
     assert len(beams) <= beam_search.beam_width
     
     # Check beam properties
@@ -95,7 +99,7 @@ def test_beam_update(beam_search, mock_trajectories):
 def test_beam_pruning(beam_search, mock_trajectories):
     """Test pruning of beam hypotheses"""
     # Add some beams
-    beam_search.update_beams(mock_trajectories)
+    beam_search.update_beams(mock_trajectories[0])
     
     # Prune with higher threshold
     beam_search.prune_beams(min_score=0.5)
@@ -107,8 +111,8 @@ def test_beam_pruning(beam_search, mock_trajectories):
 def test_path_reconstruction(beam_search, mock_trajectories):
     """Test reconstruction of best path"""
     # Add trajectories in multiple updates
-    beam_search.update_beams(mock_trajectories[:2])
-    beam_search.update_beams(mock_trajectories[2:])
+    beam_search.update_beams(mock_trajectories[0][:2])
+    beam_search.update_beams(mock_trajectories[0][2:])
     
     # Get best path
     path = beam_search.get_best_path()
@@ -123,27 +127,24 @@ def test_path_reconstruction(beam_search, mock_trajectories):
 def test_beam_width_limit(beam_search, mock_trajectories):
     """Test that beam width limit is respected"""
     # Add more trajectories than beam width
-    beams = beam_search.update_beams(mock_trajectories)
+    beams = beam_search.update_beams(mock_trajectories[0])
     assert len(beams) <= beam_search.beam_width
 
 def test_max_depth_limit(beam_search, mock_trajectories):
     """Test that max depth limit is respected"""
     # Perform updates beyond max depth
     for _ in range(beam_search.max_depth + 2):
-        beams = beam_search.update_beams(mock_trajectories)
+        beams = beam_search.update_beams(mock_trajectories[0])
     
     assert all(b.depth <= beam_search.max_depth for b in beams)
 
-def test_diversity_penalty(beam_search):
+def test_diversity_penalty(beam_search, mock_vector):
     """Test diversity penalty effect"""
     # Create similar trajectories
-    base_position = np.random.randn(768)
-    base_position = base_position / np.linalg.norm(base_position)
-    
     similar_trajectories = []
     for i in range(3):
         # Add small perturbation
-        position = base_position + np.random.randn(768) * 0.1
+        position = mock_vector + np.random.randn(768) * 0.1
         position = position / np.linalg.norm(position)
         
         trajectory = SemanticTrajectory(
@@ -170,7 +171,7 @@ def test_diversity_penalty(beam_search):
 def test_reset(beam_search, mock_trajectories):
     """Test beam search reset"""
     # Add some beams
-    beam_search.update_beams(mock_trajectories)
+    beam_search.update_beams(mock_trajectories[0])
     
     # Reset
     beam_search.reset()
@@ -183,5 +184,5 @@ def test_reset(beam_search, mock_trajectories):
 def test_different_beam_widths(mock_trajectories, beam_width):
     """Test beam search with different beam widths"""
     beam_search = BeamSearch(beam_width=beam_width)
-    beams = beam_search.update_beams(mock_trajectories)
+    beams = beam_search.update_beams(mock_trajectories[0])
     assert len(beams) <= beam_width

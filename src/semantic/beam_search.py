@@ -10,16 +10,7 @@ This module implements beam search for managing multiple trajectory hypotheses:
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Set, Tuple
 import numpy as np
-from .momentum_tracker import SemanticTrajectory, TrajectoryState
-
-@dataclass
-class BeamHypothesis:
-    """Container for a beam search hypothesis"""
-    trajectory: SemanticTrajectory
-    score: float
-    parent_id: Optional[int]  # ID of parent trajectory
-    children_ids: Set[int]    # IDs of child trajectories
-    depth: int               # Depth in the beam tree
+from .types import SemanticTrajectory, BeamHypothesis
 
 class BeamSearch:
     def __init__(
@@ -44,7 +35,7 @@ class BeamSearch:
         self.diversity_penalty = diversity_penalty
         
         # Beam management
-        self.hypotheses: Dict[int, BeamHypothesis] = {}
+        self.hypotheses: Dict[int, BeamHypothesis] = {}  # trajectory_id -> hypothesis
         self.active_beams: List[BeamHypothesis] = []
         self.completed_beams: List[BeamHypothesis] = []
     
@@ -140,6 +131,7 @@ class BeamSearch:
                         depth=0
                     )
                     new_hypotheses.append(hypothesis)
+                    self.hypotheses[traj.id] = hypothesis
         else:
             # Extend existing beams
             for parent in self.active_beams:
@@ -157,6 +149,7 @@ class BeamSearch:
                             depth=parent.depth + 1
                         )
                         new_hypotheses.append(hypothesis)
+                        self.hypotheses[traj.id] = hypothesis
                         parent.children_ids.add(traj.id)
         
         # Select top-k beams
@@ -196,12 +189,11 @@ class BeamSearch:
         current_id = best_beam.parent_id
         
         while current_id is not None:
-            # Find parent hypothesis
-            for beam in all_beams:
-                if beam.trajectory.id == current_id:
-                    path.append(beam.trajectory)
-                    current_id = beam.parent_id
-                    break
+            parent_hyp = self.hypotheses.get(current_id)
+            if parent_hyp is None:
+                break
+            path.append(parent_hyp.trajectory)
+            current_id = parent_hyp.parent_id
         
         return list(reversed(path))  # Return in chronological order
     
@@ -225,6 +217,16 @@ class BeamSearch:
             beam for beam in self.completed_beams
             if beam.score >= threshold
         ]
+        
+        # Update hypotheses dictionary
+        valid_ids = {
+            beam.trajectory.id
+            for beam in self.active_beams + self.completed_beams
+        }
+        self.hypotheses = {
+            tid: hyp for tid, hyp in self.hypotheses.items()
+            if tid in valid_ids
+        }
     
     def reset(self):
         """Reset beam search state"""

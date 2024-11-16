@@ -10,7 +10,7 @@ This module implements word lattice generation and processing:
 from dataclasses import dataclass
 from typing import Dict, List, Set, Optional, Tuple, NamedTuple
 import numpy as np
-from .momentum_tracker import SemanticTrajectory
+from .types import SemanticTrajectory
 
 class LatticeNode(NamedTuple):
     """Node in word lattice"""
