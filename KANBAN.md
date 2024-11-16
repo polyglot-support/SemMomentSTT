@@ -29,7 +29,9 @@
 - [x] Build trajectory management system
 - [x] Complete acoustic-semantic mapping
 - [x] Add audio resampling support
-- [ ] Implement text decoding from trajectories
+- [x] Implement text decoding from trajectories
+- [ ] Add word-level confidence scoring
+- [ ] Implement beam search for trajectories
 
 ### Initial Testing
 - [x] Set up test infrastructure
@@ -37,6 +39,7 @@
 - [x] Add basic test cases
 - [x] Implement unit tests for core modules
 - [x] Add sample rate conversion tests
+- [x] Add text decoder tests
 - [ ] Add integration tests for full pipeline
 - [ ] Set up CI/CD pipeline
 - [ ] Add performance benchmarks
@@ -49,7 +52,8 @@
 - [x] Basic API documentation in docstrings
 - [x] Add usage examples
 - [x] Add visualization examples
-- [ ] Create API reference
+- [x] Document text decoding API
+- [ ] Create full API reference
 - [ ] Write contributing guidelines
 
 ### Code Quality
@@ -57,6 +61,7 @@
 - [x] Add type hints to core modules
 - [x] Implement core test suite
 - [x] Add audio processing error handling
+- [x] Add text decoding error handling
 - [ ] Add code style enforcement
 - [ ] Set up performance benchmarks
 
@@ -87,6 +92,9 @@
 - [x] Add multi-format audio support
 - [x] Implement sample rate conversion
 - [x] Add force field visualization
+- [x] Implement BERT-based text decoder
+- [x] Add timestamp support
+- [x] Integrate confidence scoring
 
 ## Blocked
 
@@ -109,6 +117,7 @@
 - [x] System architecture
 - [x] Core algorithms
 - [x] Implementation details
+- [x] Text decoding approach
 - [ ] Theoretical analysis
 - [ ] Complexity analysis
 
@@ -140,10 +149,11 @@
 - [x] Core implementation
 - [x] Initial testing
 - [x] Basic visualization
+- [x] Text decoding
 
 ### Month 2
-- [ ] Text decoding implementation
-- [ ] Full system testing
+- [ ] Word-level confidence
+- [ ] Beam search implementation
 - [ ] Performance optimization
 - [ ] Initial results
 
