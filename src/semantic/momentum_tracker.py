@@ -5,7 +5,7 @@ This module implements the core semantic momentum tracking functionality:
 - Multi-trajectory state maintenance
 - Momentum vector computation
 - Semantic force field modeling
-- Confidence scoring
+- Beam search for trajectory management
 """
 
 import numpy as np
@@ -15,6 +15,7 @@ from enum import Enum
 from scipy.spatial.distance import cosine
 import torch
 import torch.nn.functional as F
+from .beam_search import BeamSearch, BeamHypothesis
 
 class TrajectoryState(Enum):
     ACTIVE = "active"
@@ -45,7 +46,9 @@ class MomentumTracker:
         momentum_decay: float = 0.95,
         min_confidence: float = 0.1,
         merge_threshold: float = 0.85,
-        force_scale: float = 1.0
+        force_scale: float = 1.0,
+        beam_width: int = 3,
+        beam_depth: int = 5
     ):
         """
         Initialize the momentum tracker
@@ -57,6 +60,8 @@ class MomentumTracker:
             min_confidence: Minimum confidence threshold for pruning
             merge_threshold: Cosine similarity threshold for merging trajectories
             force_scale: Scaling factor for semantic forces
+            beam_width: Width of beam search
+            beam_depth: Maximum depth of beam search
         """
         self.semantic_dim = semantic_dim
         self.max_trajectories = max_trajectories
@@ -64,6 +69,14 @@ class MomentumTracker:
         self.min_confidence = min_confidence
         self.merge_threshold = merge_threshold
         self.force_scale = force_scale
+        
+        # Initialize beam search
+        self.beam_search = BeamSearch(
+            beam_width=beam_width,
+            max_depth=beam_depth,
+            score_threshold=min_confidence,
+            diversity_penalty=0.1
+        )
         
         self.trajectories: Dict[int, SemanticTrajectory] = {}
         self.next_trajectory_id = 0
@@ -112,29 +125,41 @@ class MomentumTracker:
             acoustic_evidence: New acoustic evidence vector
             confidence: Confidence score for the new evidence
         """
-        # Create new trajectory if needed
-        if len(self.active_trajectories) < self.max_trajectories:
-            self._create_trajectory(acoustic_evidence, confidence)
+        # Create new trajectory
+        trajectory = self._create_trajectory(acoustic_evidence, confidence)
         
-        # Update existing trajectories
-        for trajectory in self.active_trajectories:
+        # Update existing trajectories with forces
+        for traj in self.active_trajectories:
             # Apply semantic forces
-            force = self.compute_force_field(trajectory.position)
+            force = self.compute_force_field(traj.position)
             
             # Add force from acoustic evidence
-            evidence_force = acoustic_evidence - trajectory.position
+            evidence_force = acoustic_evidence - traj.position
             force += evidence_force * confidence
             
             # Update trajectory
-            trajectory.update_position(force)
+            traj.update_position(force)
             
             # Apply momentum decay
-            trajectory.momentum *= self.momentum_decay
+            traj.momentum *= self.momentum_decay
             
             # Update confidence based on consistency and evidence
-            self._update_confidence(trajectory, acoustic_evidence, confidence)
+            self._update_confidence(traj, acoustic_evidence, confidence)
+        
+        # Update beam search with all trajectories
+        beams = self.beam_search.update_beams(self.active_trajectories)
+        
+        # Update trajectory states based on beam search
+        active_ids = {beam.trajectory.id for beam in beams}
+        for traj in self.active_trajectories:
+            if traj.id not in active_ids:
+                traj.state = TrajectoryState.PRUNED
     
-    def _create_trajectory(self, position: np.ndarray, confidence: float):
+    def _create_trajectory(
+        self,
+        position: np.ndarray,
+        confidence: float
+    ) -> SemanticTrajectory:
         """Create a new trajectory"""
         trajectory = SemanticTrajectory(
             id=self.next_trajectory_id,
@@ -146,6 +171,7 @@ class MomentumTracker:
         )
         self.trajectories[self.next_trajectory_id] = trajectory
         self.next_trajectory_id += 1
+        return trajectory
     
     def _update_confidence(
         self,
@@ -191,8 +217,16 @@ class MomentumTracker:
     
     def prune_trajectories(self):
         """Remove low confidence trajectories"""
+        # Use beam search pruning
+        self.beam_search.prune_beams(self.min_confidence)
+        
+        # Update trajectory states
+        active_ids = {
+            beam.trajectory.id
+            for beam in self.beam_search.active_beams
+        }
         for trajectory in self.active_trajectories:
-            if trajectory.confidence < self.min_confidence:
+            if trajectory.id not in active_ids:
                 trajectory.state = TrajectoryState.PRUNED
     
     @property
@@ -210,7 +244,34 @@ class MomentumTracker:
         Returns:
             The trajectory with highest confidence, if any exist
         """
-        active = self.active_trajectories
-        if not active:
-            return None
-        return max(active, key=lambda t: t.confidence)
+        # Get best path from beam search
+        path = self.beam_search.get_best_path()
+        if path:
+            return path[-1]  # Return most recent trajectory
+        return None
+    
+    def get_trajectory_paths(self) -> List[List[SemanticTrajectory]]:
+        """
+        Get all active trajectory paths from beam search
+        
+        Returns:
+            List of trajectory paths, ordered by score
+        """
+        paths = []
+        for beam in self.beam_search.active_beams:
+            path = []
+            current = beam
+            while current is not None:
+                path.append(current.trajectory)
+                parent_id = current.parent_id
+                current = next(
+                    (b for b in self.beam_search.active_beams
+                     if b.trajectory.id == parent_id),
+                    None
+                )
+            paths.append(list(reversed(path)))
+        return sorted(
+            paths,
+            key=lambda p: p[-1].confidence,
+            reverse=True
+        )
