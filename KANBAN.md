@@ -32,8 +32,9 @@
 - [x] Implement text decoding from trajectories
 - [x] Add word-level confidence scoring
 - [x] Implement beam search for trajectories
-- [ ] Add N-best list output
+- [x] Add N-best list output
 - [ ] Optimize beam search parameters
+- [ ] Add lattice generation
 
 ### Initial Testing
 - [x] Set up test infrastructure
@@ -44,6 +45,7 @@
 - [x] Add text decoder tests
 - [x] Add word-level confidence tests
 - [x] Add beam search integration tests
+- [x] Add N-best list validation
 - [ ] Add integration tests for full pipeline
 - [ ] Set up CI/CD pipeline
 - [ ] Add performance benchmarks
@@ -59,6 +61,7 @@
 - [x] Document text decoding API
 - [x] Document word-level confidence API
 - [x] Document beam search functionality
+- [x] Document N-best list features
 - [ ] Create full API reference
 - [ ] Write contributing guidelines
 
@@ -70,6 +73,7 @@
 - [x] Add text decoding error handling
 - [x] Add word-level confidence validation
 - [x] Add beam search validation
+- [x] Add N-best list validation
 - [ ] Add code style enforcement
 - [ ] Set up performance benchmarks
 
@@ -107,6 +111,8 @@
 - [x] Implement word history tracking
 - [x] Add beam search trajectory management
 - [x] Implement path reconstruction
+- [x] Add N-best list generation
+- [x] Add hypothesis ranking
 
 ## Blocked
 
@@ -132,6 +138,7 @@
 - [x] Text decoding approach
 - [x] Confidence scoring method
 - [x] Beam search algorithm
+- [x] N-best list generation
 - [ ] Theoretical analysis
 - [ ] Complexity analysis
 
@@ -166,9 +173,10 @@
 - [x] Text decoding
 - [x] Word-level confidence
 - [x] Beam search
+- [x] N-best list output
 
 ### Month 2
-- [ ] N-best list output
+- [ ] Lattice generation
 - [ ] Performance optimization
 - [ ] Initial results
 - [ ] System evaluation
