@@ -8,10 +8,11 @@ import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from pathlib import Path
-from typing import Optional, Generator, Union, List
+from typing import Optional, Generator, Union, List, Tuple
 from queue import Queue
 from threading import Thread, Event
 import torch
+import librosa
 
 from .integration.pipeline import IntegrationPipeline
 from .semantic.momentum_tracker import SemanticTrajectory
@@ -31,7 +32,7 @@ class SemMomentSTT:
             model_name: Name of the acoustic model to use
             semantic_dim: Dimensionality of semantic space
             device: Device to run on (cpu/cuda)
-            sample_rate: Audio sample rate in Hz
+            sample_rate: Target audio sample rate in Hz
         """
         self.pipeline = IntegrationPipeline(
             acoustic_model=model_name,
@@ -40,6 +41,35 @@ class SemMomentSTT:
         )
         self.sample_rate = sample_rate
         self._stop_recording = Event()
+    
+    def _load_audio(
+        self,
+        audio_path: Union[str, Path]
+    ) -> Tuple[np.ndarray, int]:
+        """
+        Load and prepare audio file
+        
+        Args:
+            audio_path: Path to audio file
+            
+        Returns:
+            Tuple of (audio data, sample rate)
+        """
+        try:
+            # Try soundfile first (faster for wav files)
+            audio, file_sample_rate = sf.read(audio_path)
+        except:
+            # Fall back to librosa (handles more formats)
+            audio, file_sample_rate = librosa.load(
+                audio_path,
+                sr=None  # Preserve original sample rate
+            )
+        
+        # Convert to mono if stereo
+        if len(audio.shape) > 1:
+            audio = np.mean(audio, axis=1)
+        
+        return audio, file_sample_rate
     
     def transcribe_file(
         self,
@@ -57,21 +87,10 @@ class SemMomentSTT:
             List of semantic trajectories
         """
         # Load audio file
-        audio, file_sample_rate = sf.read(audio_path)
-        
-        # Resample if needed
-        if file_sample_rate != self.sample_rate:
-            # TODO: Implement resampling
-            raise ValueError(
-                f"Sample rate mismatch: {file_sample_rate} != {self.sample_rate}"
-            )
-        
-        # Convert to mono if stereo
-        if len(audio.shape) > 1:
-            audio = np.mean(audio, axis=1)
+        audio, file_sample_rate = self._load_audio(audio_path)
         
         # Process in chunks
-        chunk_size = int(self.sample_rate * chunk_duration)
+        chunk_size = int(file_sample_rate * chunk_duration)
         trajectories = []
         
         for i in range(0, len(audio), chunk_size):
@@ -85,7 +104,12 @@ class SemMomentSTT:
                     mode='constant'
                 )
             
-            trajectory = self.pipeline.process_frame(chunk)
+            # Process chunk with original sample rate
+            trajectory = self.pipeline.process_frame(
+                chunk,
+                orig_sr=file_sample_rate
+            )
+            
             if trajectory is not None:
                 trajectories.append(trajectory)
         
@@ -93,23 +117,32 @@ class SemMomentSTT:
     
     def transcribe_stream(
         self,
-        audio_stream: Generator[np.ndarray, None, None]
+        audio_stream: Generator[np.ndarray, None, None],
+        stream_sample_rate: Optional[int] = None
     ) -> Generator[SemanticTrajectory, None, None]:
         """
         Transcribe a stream of audio data
         
         Args:
             audio_stream: Generator yielding audio frames
+            stream_sample_rate: Sample rate of the audio stream
             
         Yields:
             Semantic trajectories as they become available
         """
-        return self.pipeline.process_stream(audio_stream)
+        for audio_frame in audio_stream:
+            trajectory = self.pipeline.process_frame(
+                audio_frame,
+                orig_sr=stream_sample_rate
+            )
+            if trajectory is not None:
+                yield trajectory
     
     def transcribe_microphone(
         self,
         device: Optional[int] = None,
-        chunk_duration: float = 0.5
+        chunk_duration: float = 0.5,
+        input_sample_rate: Optional[int] = None
     ) -> Generator[SemanticTrajectory, None, None]:
         """
         Transcribe audio from microphone in real-time
@@ -117,11 +150,22 @@ class SemMomentSTT:
         Args:
             device: Audio input device ID (None for default)
             chunk_duration: Duration of each audio chunk in seconds
+            input_sample_rate: Sample rate to use for input (None for device default)
             
         Yields:
             Semantic trajectories as they become available
         """
-        chunk_size = int(self.sample_rate * chunk_duration)
+        # Get device info
+        if device is not None:
+            device_info = sd.query_devices(device, 'input')
+            device_sr = int(device_info['default_samplerate'])
+        else:
+            device_sr = 44100  # Common default
+        
+        # Use specified rate or device default
+        stream_sr = input_sample_rate or device_sr
+        chunk_size = int(stream_sr * chunk_duration)
+        
         audio_queue = Queue()
         self._stop_recording.clear()
         
@@ -134,14 +178,14 @@ class SemMomentSTT:
         
         # Start audio input stream
         with sd.InputStream(
-            samplerate=self.sample_rate,
+            samplerate=stream_sr,
             channels=1,
             dtype=np.float32,
             blocksize=chunk_size,
             device=device,
             callback=audio_callback
         ):
-            print("Listening... Press Ctrl+C to stop.")
+            print(f"Listening... (Input rate: {stream_sr}Hz) Press Ctrl+C to stop.")
             try:
                 while not self._stop_recording.is_set():
                     # Get audio chunk from queue
@@ -149,7 +193,8 @@ class SemMomentSTT:
                     
                     # Process audio chunk
                     trajectory = self.pipeline.process_frame(
-                        audio_chunk.flatten()
+                        audio_chunk.flatten(),
+                        orig_sr=stream_sr
                     )
                     
                     if trajectory is not None:
