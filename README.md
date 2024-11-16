@@ -67,49 +67,11 @@ stt = SemMomentSTT(
 )
 ```
 
-## Project Structure
-
-```
-SemMomentSTT/
-├── src/
-│   ├── acoustic/        # Acoustic processing module
-│   ├── semantic/        # Semantic momentum tracking
-│   ├── integration/     # System integration
-│   └── main.py         # Main interface
-├── tests/              # Test suite (coming soon)
-├── examples/           # Usage examples (coming soon)
-├── requirements.txt    # Project dependencies
-└── README.md          # This file
-```
-
 ## Development Status
 
 This project is currently in active development. See [KANBAN.md](KANBAN.md) for current progress and upcoming tasks.
 
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines (coming soon) before submitting pull requests.
-
 ## License
 
-This project is licensed under the [NOT LICENSED YET] file for details.
+This project is licensed under the CC-BY-NC-ND Creative commons license.
 
-## Citation
-
-If you use this work in your research, please cite:
-
-```bibtex
-@misc{semmomentstt2023,
-  title={Semantic Momentum in Speech Recognition: A Novel Approach to Continuous Speech Understanding},
-  author={[Author Names]},
-  year={2023},
-  publisher={GitHub},
-  journal={GitHub repository},
-  howpublished={\url{https://github.com/yourusername/SemMomentSTT}}
-}
-```
-
-## Acknowledgments
-
-- Thanks to the Wav2Vec2 team for their excellent speech recognition model
-- Contributors and researchers in the field of continuous speech recognition
