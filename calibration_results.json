@@ -1,0 +1,452 @@
+[
+    {
+        "force_scale": 6.111111111111111,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.7571428571428571,
+        "wer": 0.990909090909091,
+        "reference_text": "congratulations were poured in upon the princess everywhere during her journey",
+        "generated_text": "carried ass ass in in any one one en era"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.7,
+        "wer": 0.9928571428571429,
+        "reference_text": "from the respect paid her on all sides she seemed like a queen and",
+        "generated_text": "the the the the the the the the four the"
+    },
+    {
+        "force_scale": 13.88888888888889,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 0.9928571428571429,
+        "reference_text": "this has indeed been a harassing day continued the young man his eyes fixed",
+        "generated_text": "indeed ##rel korea species indeed college ##rel ##ient ##ient ##ient"
+    },
+    {
+        "force_scale": 7.222222222222222,
+        "momentum_decay": 0.9968888888888889,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.8428571428571429,
+        "wer": 0.9933333333333334,
+        "reference_text": "she taught her daughter then by her own affection for it that love for a",
+        "generated_text": "daughter daughter daughter daughter daughter daughter new daughter daughter daughter"
+    },
+    {
+        "force_scale": 10.555555555555555,
+        "momentum_decay": 0.9905555555555555,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "ii ##ions ii ii ii ii ii ii"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "handful popular unit unit unit unit unit handful"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "captured ##tem ##tem ##tem ##tem ohio ohio especially"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "picnic brass brass brass brass brass brass eliminated"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9968888888888889,
+        "min_confidence": 0.05,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "sleeper global global most most most ##for diver"
+    },
+    {
+        "force_scale": 7.222222222222222,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7571428571428571,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "bonnet kinetic kinetic bonnet bonnet bonnet bonnet aide"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "wood lord lord lord lord lord lord washington"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "purchased konrad buy buy buy ##ducted ##ducted stars"
+    },
+    {
+        "force_scale": 15.0,
+        "momentum_decay": 0.9905555555555555,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.8428571428571429,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "hall sight sight sight sight sight sight hand"
+    },
+    {
+        "force_scale": 13.88888888888889,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "needs needs needs needs needs needs needs leopold"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "clearance clearance clearance clearance clearance clearance clearance blanche"
+    },
+    {
+        "force_scale": 5.0,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "left powerful fast fast black black black ##group"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.98,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.7285714285714285,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "dome gordon gordon gordon best gordon net on"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "cap project project project project project project project"
+    },
+    {
+        "force_scale": 8.333333333333334,
+        "momentum_decay": 0.9842222222222222,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.8428571428571429,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "ball blast blast blast blast ##note ##note ##note"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##truct belle project project project project project yearly"
+    },
+    {
+        "force_scale": 10.555555555555555,
+        "momentum_decay": 0.98,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.8428571428571429,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "rob bono stan stan stan stan stan stan"
+    },
+    {
+        "force_scale": 15.0,
+        "momentum_decay": 0.9905555555555555,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "basketball basketball bit bit bit bit bit bit"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.05,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "occasional occasional occasional occasional occasional bethel bethel ##bara"
+    },
+    {
+        "force_scale": 6.111111111111111,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##n ##can ##can ##can ##can ##n ##can ##can"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "walk walk walk walk walk walk walk horace"
+    },
+    {
+        "force_scale": 13.88888888888889,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.8428571428571429,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "sparrow sparrow diagnosed diagnosed sparrow sparrow diagnosed diagnosed"
+    },
+    {
+        "force_scale": 13.88888888888889,
+        "momentum_decay": 0.9842222222222222,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "defending research research household protest protest protest performing"
+    },
+    {
+        "force_scale": 5.0,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "por spear spear spear sur sur sur stand"
+    },
+    {
+        "force_scale": 5.0,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7571428571428571,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##stle ##urer ##urer ##urer ##tered ##tered ##tered bret"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.98,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "in province province province immediately immediately province on"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.982111111111111,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "guns frank frank frank frank gun gun background"
+    },
+    {
+        "force_scale": 10.555555555555555,
+        "momentum_decay": 0.9968888888888889,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "viper viper viper viper viper viper ari viper"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "occasionally posterior posterior posterior ##backs ##backs ##backs effective"
+    },
+    {
+        "force_scale": 6.111111111111111,
+        "momentum_decay": 0.9947777777777778,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "rural rural rural marriage rural marriage rural rural"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9884444444444445,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "back ##cki ##cki ##cki ##cock ##be craft ##cki"
+    },
+    {
+        "force_scale": 5.0,
+        "momentum_decay": 0.999,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.7857142857142857,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "hudson tony tony tony ##zier tony tony orders"
+    },
+    {
+        "force_scale": 8.333333333333334,
+        "momentum_decay": 0.98,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.9,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##ky ##ky ##ky ##ky ##ky standard standard standard"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.9947777777777778,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "coupe coupe coupe coupe coupe slightest slightest follow"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##iom gwen gwen ##onale cemetery cemetery cemetery cemetery"
+    },
+    {
+        "force_scale": 6.111111111111111,
+        "momentum_decay": 0.9947777777777778,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7285714285714285,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "just port port just just just just just"
+    },
+    {
+        "force_scale": 8.333333333333334,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.7571428571428571,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "##kla ##kla ##kla usa usa ss ss ss"
+    },
+    {
+        "force_scale": 12.777777777777779,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.7571428571428571,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "drew thin thin thin barely thin barely thin"
+    },
+    {
+        "force_scale": 5.0,
+        "momentum_decay": 0.9905555555555555,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.7285714285714285,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "uh uh uh field field field field there"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.9842222222222222,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "my ##5 ##redo my my my ##rant his"
+    },
+    {
+        "force_scale": 13.88888888888889,
+        "momentum_decay": 0.9905555555555555,
+        "min_confidence": 0.14,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "staging ##cam heroism heroism heroism gladstone heroism ##mir"
+    },
+    {
+        "force_scale": 8.333333333333334,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.05,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "selection selection honey rwanda rwanda rwanda selection ..."
+    },
+    {
+        "force_scale": 7.222222222222222,
+        "momentum_decay": 0.9926666666666667,
+        "min_confidence": 0.08000000000000002,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "division hungarian conditions hungarian hungarian hungarian hungarian hungarian"
+    },
+    {
+        "force_scale": 11.666666666666668,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.11000000000000001,
+        "merge_threshold": 0.8142857142857143,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "contributed contributed contributed contributed contributed contributed contributed watts"
+    },
+    {
+        "force_scale": 9.444444444444445,
+        "momentum_decay": 0.9947777777777778,
+        "min_confidence": 0.2,
+        "merge_threshold": 0.7,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "persons persons details provided details details details provided"
+    },
+    {
+        "force_scale": 10.555555555555555,
+        "momentum_decay": 0.9863333333333333,
+        "min_confidence": 0.17000000000000004,
+        "merge_threshold": 0.8714285714285714,
+        "wer": 1.0,
+        "reference_text": "concord returned to its place amidst the tents",
+        "generated_text": "bwv merit ##ial ##ial merit right right ##ial"
+    }
+]

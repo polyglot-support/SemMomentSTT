@@ -37,10 +37,10 @@ class TextDecoder:
         self,
         model_name: str = "bert-base-uncased",
         device: Optional[str] = None,
-        min_confidence: float = 0.3,
-        context_size: int = 5,
-        lm_weight: float = 0.3,
-        semantic_weight: float = 0.7,
+        min_confidence: float = 0.1,  # Lowered threshold
+        context_size: int = 10,  # Increased context
+        lm_weight: float = 0.4,  # Adjusted weights
+        semantic_weight: float = 0.6,
         max_history: int = 100
     ):
         """
@@ -74,6 +74,9 @@ class TextDecoder:
         self.context_tokens: List[str] = []
         self.context_embeddings: List[np.ndarray] = []
         self.word_history: List[WordScore] = []
+        
+        # Add special tokens to context
+        self.context_tokens.append("[CLS]")
     
     def _initialize_token_embeddings(self) -> torch.Tensor:
         """
@@ -86,7 +89,20 @@ class TextDecoder:
             # Get embeddings for all tokens
             vocab_size = self.tokenizer.vocab_size
             token_ids = torch.arange(vocab_size).to(self.device)
-            embeddings = self.model.get_input_embeddings()(token_ids)
+            
+            # Get both input and output embeddings
+            input_embeddings = self.model.get_input_embeddings()(token_ids)
+            output_embeddings = self.model.get_output_embeddings().weight
+            
+            # Average input and output embeddings for better representation
+            embeddings = (input_embeddings + output_embeddings) / 2
+            
+            # Project to match semantic space dimensionality if needed
+            if embeddings.shape[1] != 768:  # Standard BERT dimension
+                projection = torch.nn.Linear(
+                    embeddings.shape[1], 768
+                ).to(self.device)
+                embeddings = projection(embeddings)
             
             # Normalize embeddings and ensure float32
             return F.normalize(embeddings.float(), p=2, dim=1)
@@ -94,7 +110,7 @@ class TextDecoder:
     def _find_nearest_tokens(
         self,
         semantic_vector: np.ndarray,
-        k: int = 5
+        k: int = 10  # Increased candidates
     ) -> List[Tuple[str, float]]:
         """
         Find the k nearest tokens to a semantic vector
@@ -116,10 +132,17 @@ class TextDecoder:
         # Get top-k tokens
         values, indices = torch.topk(similarities, k)
         
-        return [
-            (self.tokenizer.decode([idx.item()]), val.item())
-            for idx, val in zip(indices, values)
-        ]
+        # Filter special tokens and get words
+        candidates = []
+        for idx, val in zip(indices, values):
+            token = self.tokenizer.decode([idx.item()])
+            # Skip special tokens and short tokens
+            if not (token.startswith('[') and token.endswith(']')) and len(token.strip()) > 1:
+                candidates.append((token, val.item()))
+                if len(candidates) >= k//2:  # Get at least k/2 valid candidates
+                    break
+        
+        return candidates
     
     def _compute_language_model_scores(
         self,
@@ -139,31 +162,44 @@ class TextDecoder:
         if not candidates:
             return []
             
+        # Get recent context
         context = context or " ".join(self.context_tokens[-self.context_size:])
         
         scored_candidates = []
         with torch.no_grad():
-            for token, sim in candidates:
-                # Create input with candidate
-                text = f"{context} {token}"
-                inputs = self.tokenizer(
-                    text,
-                    return_tensors="pt",
-                    padding=True
-                ).to(self.device)
-                
-                # Get model prediction
-                outputs = self.model(**inputs)
-                logits = outputs.logits
+            # Create inputs for all candidates at once
+            texts = [f"{context} {token}" for token, _ in candidates]
+            inputs = self.tokenizer(
+                texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=512
+            ).to(self.device)
+            
+            # Get model predictions
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            
+            # Score each candidate
+            for i, (token, sim) in enumerate(candidates):
+                token_id = self.tokenizer.encode(token)[-1]
                 
                 # Get score for the candidate token
-                token_id = self.tokenizer.encode(token)[-1]
-                lm_score = torch.softmax(
-                    logits[0, -1],
-                    dim=0
-                )[token_id].item()
+                token_logits = logits[i, -1]
+                token_probs = torch.softmax(token_logits, dim=0)
+                lm_score = token_probs[token_id].item()
                 
                 scored_candidates.append((token, sim, lm_score))
+        
+        # Sort by combined score
+        scored_candidates.sort(
+            key=lambda x: (
+                self.semantic_weight * x[1] +  # semantic similarity
+                self.lm_weight * x[2]  # language model score
+            ),
+            reverse=True
+        )
         
         return scored_candidates
     
@@ -184,7 +220,15 @@ class TextDecoder:
         Returns:
             DecodingResult if successful, None otherwise
         """
-        if trajectory.confidence < self.min_confidence:
+        # Scale confidence threshold based on trajectory history
+        dynamic_threshold = self.min_confidence
+        if len(trajectory.history) > 1:
+            # Increase threshold if trajectory is stable
+            pos_diff = np.linalg.norm(trajectory.history[-1] - trajectory.history[-2])
+            if pos_diff < 0.1:  # Stable trajectory
+                dynamic_threshold *= 0.8  # Lower threshold for stable trajectories
+        
+        if trajectory.confidence < dynamic_threshold:
             return None
         
         # Find nearest tokens
@@ -197,11 +241,18 @@ class TextDecoder:
             # Get best candidate
             word, semantic_sim, lm_score = scored_candidates[0]
             
-            # Compute final confidence
-            confidence = (
+            # Compute final confidence with temporal smoothing
+            raw_confidence = (
                 self.semantic_weight * semantic_sim +
                 self.lm_weight * lm_score
             ) * trajectory.confidence
+            
+            # Apply temporal smoothing if we have history
+            if self.word_history:
+                last_conf = self.word_history[-1].confidence
+                confidence = 0.7 * last_conf + 0.3 * raw_confidence
+            else:
+                confidence = raw_confidence
             
             # Create word score
             word_score = WordScore(
@@ -218,9 +269,11 @@ class TextDecoder:
             self.context_embeddings.append(trajectory.position)
             
             # Maintain context size
-            if len(self.context_tokens) > self.context_size:
-                self.context_tokens.pop(0)
-                self.context_embeddings.pop(0)
+            while len(self.context_tokens) > self.context_size:
+                # Keep [CLS] token
+                if len(self.context_tokens) > 1:
+                    self.context_tokens.pop(1)
+                    self.context_embeddings.pop(0)
             
             # Update word history
             self.word_history.append(word_score)
@@ -270,11 +323,12 @@ class TextDecoder:
     
     def reset_context(self):
         """Reset the decoding context"""
-        self.context_tokens.clear()
+        self.context_tokens = ["[CLS]"]  # Keep initial token
         self.context_embeddings.clear()
         self.word_history.clear()
     
     @property
     def context(self) -> str:
         """Get the current context string"""
-        return " ".join(self.context_tokens)
+        # Skip [CLS] token
+        return " ".join(self.context_tokens[1:])

@@ -22,10 +22,10 @@ class MomentumTracker:
         self,
         semantic_dim: int = 768,
         max_trajectories: int = 5,
-        momentum_decay: float = 0.95,
-        min_confidence: float = 0.1,
-        merge_threshold: float = 0.85,
-        force_scale: float = 1.274,
+        momentum_decay: float = 0.98,  # Increased for more stable trajectories
+        min_confidence: float = 0.05,  # Lowered to be less strict
+        merge_threshold: float = 0.75,  # Lowered to allow more merging
+        force_scale: float = 0.5,  # Reduced for more stable movement
         beam_width: int = 3,
         beam_depth: int = 5
     ):
@@ -54,18 +54,26 @@ class MomentumTracker:
             beam_width=beam_width,
             max_depth=beam_depth,
             score_threshold=min_confidence,
-            diversity_penalty=0.1
+            diversity_penalty=0.2  # Increased for more diverse paths
         )
         
         self.trajectories: Dict[int, SemanticTrajectory] = {}
         self.next_trajectory_id = 0
         
-        # Initialize attraction centers
-        self.attraction_centers = np.random.randn(10, semantic_dim)
+        # Initialize attraction centers in a more structured way
+        # Create evenly spaced centers
+        angles = np.linspace(0, 2*np.pi, 8, endpoint=False)
+        centers = []
+        for angle in angles:
+            center = np.zeros(semantic_dim)
+            center[0] = np.cos(angle)
+            center[1] = np.sin(angle)
+            centers.append(center)
+        self.attraction_centers = np.array(centers)
         self.attraction_centers = self.attraction_centers / np.linalg.norm(
             self.attraction_centers, axis=1, keepdims=True
         )
-        self.attraction_strengths = np.ones(10) * 0.05
+        self.attraction_strengths = np.ones(8) * 0.02  # Reduced strength
     
     def compute_force_field(self, position: np.ndarray) -> np.ndarray:
         """
@@ -80,21 +88,24 @@ class MomentumTracker:
         # Initialize force vector
         force = np.zeros_like(position)
         
-        # Add forces from attraction centers
+        # Add forces from attraction centers with quadratic falloff
         for center, strength in zip(self.attraction_centers, self.attraction_strengths):
             direction = center - position
             distance = max(np.linalg.norm(direction), 1e-6)
-            force += strength * direction / (distance ** 2)
+            force += strength * direction / (distance * distance)
         
-        # Add forces from other trajectories
+        # Add repulsive forces from other trajectories with cubic falloff
         for trajectory in self.active_trajectories:
             if not np.array_equal(trajectory.position, position):
                 direction = trajectory.position - position
                 distance = max(np.linalg.norm(direction), 1e-6)
-                force -= 0.01 * direction / (distance ** 2)
+                force -= 0.005 * direction / (distance * distance * distance)  # Reduced repulsion
         
-        # Scale force
+        # Scale force and clip to prevent extreme values
         force *= self.force_scale
+        force_magnitude = np.linalg.norm(force)
+        if force_magnitude > 1.0:
+            force = force / force_magnitude
         
         return force
     
@@ -108,12 +119,20 @@ class MomentumTracker:
                 new_magnitude = momentum_magnitude * self.momentum_decay
                 trajectory.momentum = momentum_dir * new_magnitude
         
-        # Add force contribution
+        # Add force contribution with smoothing
         if not np.allclose(force, 0):
             force_magnitude = np.linalg.norm(force)
             if force_magnitude > 1e-6:
                 force_dir = force / force_magnitude
-                trajectory.momentum += force_dir * self.force_scale * 0.5  # Increased force contribution
+                # Smooth force addition
+                if np.allclose(trajectory.momentum, 0):
+                    trajectory.momentum = force_dir * self.force_scale * 0.25
+                else:
+                    # Blend new force with current momentum direction
+                    current_dir = trajectory.momentum / np.linalg.norm(trajectory.momentum)
+                    blended_dir = 0.7 * current_dir + 0.3 * force_dir
+                    blended_dir = blended_dir / np.linalg.norm(blended_dir)
+                    trajectory.momentum += blended_dir * self.force_scale * 0.25
     
     def update_trajectories(self, acoustic_evidence: np.ndarray, confidence: float):
         """
@@ -147,7 +166,7 @@ class MomentumTracker:
                     if pos_norm > 1e-6:
                         traj.position = merged_pos / pos_norm
                     
-                    # Update momentum - preserve direction but adjust magnitude
+                    # Update momentum with smooth transition
                     if not np.allclose(traj.momentum, 0):
                         momentum_dir = traj.momentum / np.linalg.norm(traj.momentum)
                         traj.momentum = momentum_dir * np.linalg.norm(traj.momentum) * self.momentum_decay
@@ -169,18 +188,23 @@ class MomentumTracker:
                 force_magnitude = np.linalg.norm(force)
                 if force_magnitude > 1e-6:
                     force_dir = force / force_magnitude
-                    traj.momentum = force_dir * self.force_scale * 0.5  # Increased initial momentum
+                    traj.momentum = force_dir * self.force_scale * 0.25
             else:
                 # Compute and apply forces
                 force = self.compute_force_field(traj.position)
                 evidence_force = acoustic_evidence - traj.position
-                force += evidence_force * confidence
+                force += evidence_force * confidence * 0.5  # Reduced evidence influence
                 
                 # Update momentum with decay and new force
                 self._update_momentum(traj, force)
             
-            # Update position
+            # Update position with momentum clamping
             if not np.allclose(traj.momentum, 0):
+                # Clamp momentum magnitude
+                momentum_magnitude = np.linalg.norm(traj.momentum)
+                if momentum_magnitude > 0.1:  # Maximum step size
+                    traj.momentum = (traj.momentum / momentum_magnitude) * 0.1
+                
                 traj.position += traj.momentum
                 pos_norm = np.linalg.norm(traj.position)
                 if pos_norm > 1e-6:
@@ -189,7 +213,7 @@ class MomentumTracker:
             # Update history
             traj.history.append(traj.position.copy())
             
-            # Update confidence
+            # Update confidence with temporal smoothing
             self._update_confidence(traj, acoustic_evidence, confidence)
         
         # Try to merge similar trajectories again
@@ -257,13 +281,13 @@ class MomentumTracker:
             evidence: New evidence vector
             evidence_confidence: Confidence of the new evidence
         """
-        # Compute similarity
+        # Compute similarity with cosine distance
         similarity = 1 - cosine(trajectory.position, evidence)
         
-        # Update confidence with temporal decay
+        # Update confidence with temporal smoothing
         trajectory.confidence = (
-            0.7 * trajectory.confidence +
-            0.3 * similarity * evidence_confidence
+            0.8 * trajectory.confidence +  # Increased history weight
+            0.2 * similarity * evidence_confidence  # Reduced new evidence weight
         )
         trajectory.confidence = np.clip(trajectory.confidence, 0.0, 1.0)
         
@@ -299,12 +323,19 @@ class MomentumTracker:
                     if pos_norm > 1e-6:
                         t1.position = merged_pos / pos_norm
                     
-                    # Update momentum - preserve direction but combine magnitudes
+                    # Update momentum with smooth blending
                     if not np.allclose(t1.momentum, 0) and not np.allclose(t2.momentum, 0):
                         m1_norm = np.linalg.norm(t1.momentum)
                         m2_norm = np.linalg.norm(t2.momentum)
                         if m1_norm > 1e-6:
-                            t1.momentum = (t1.momentum / m1_norm) * (weight1 * m1_norm + weight2 * m2_norm)
+                            # Blend momentum directions
+                            m1_dir = t1.momentum / m1_norm
+                            m2_dir = t2.momentum / m2_norm
+                            merged_dir = weight1 * m1_dir + weight2 * m2_dir
+                            merged_dir = merged_dir / np.linalg.norm(merged_dir)
+                            # Use weighted average of magnitudes
+                            merged_mag = weight1 * m1_norm + weight2 * m2_norm
+                            t1.momentum = merged_dir * merged_mag
                     
                     t1.confidence = new_confidence
                     t2.state = TrajectoryState.MERGED

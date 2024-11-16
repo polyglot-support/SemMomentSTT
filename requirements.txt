@@ -25,6 +25,10 @@ pylint>=2.17.0
 tensorboard>=2.13.0  # For experiment tracking
 tqdm>=4.65.0        # For progress bars
 
+# Benchmarking dependencies
+datasets>=2.12.0    # For loading speech datasets
+jiwer>=3.0.0        # For calculating Word Error Rate (WER)
+
 # Note: graphviz also requires the system-level Graphviz package:
 # Ubuntu/Debian: sudo apt-get install graphviz
 # macOS: brew install graphviz

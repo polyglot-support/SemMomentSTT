@@ -44,9 +44,9 @@ class IntegrationPipeline:
         device: Optional[str] = None,
         max_trajectories: int = 5,
         n_best: int = 5,
-        force_scale: float = 1.274,
-        step_size: float = 100.0,
-        momentum_decay: float = 0.999,
+        force_scale: float = 10.0,  # Increased for stronger semantic forces
+        step_size: float = 50.0,  # Reduced for smoother movement
+        momentum_decay: float = 0.999,  # Increased for better momentum
         min_confidence: float = 0.1,
         merge_threshold: float = 0.85
     ):
@@ -101,16 +101,41 @@ class IntegrationPipeline:
         # Time tracking
         self.current_time: float = 0.0
         
-        # Initialize semantic projection layer
-        self.semantic_projection = torch.nn.Linear(
-            self.acoustic_processor.model.config.hidden_size,
-            semantic_dim
-        ).to(self.device)
-        
-        # Initialize semantic projection weights
+        # Initialize semantic projection layer using BERT embeddings
+        self.semantic_projection = self._initialize_semantic_projection()
+    
+    def _initialize_semantic_projection(self) -> torch.nn.Module:
+        """Initialize semantic projection using BERT embeddings"""
         with torch.no_grad():
-            torch.nn.init.orthogonal_(self.semantic_projection.weight)
-            torch.nn.init.zeros_(self.semantic_projection.bias)
+            # Get BERT embeddings
+            bert_embeddings = self.text_decoder.model.get_input_embeddings()
+            bert_dim = bert_embeddings.weight.shape[1]
+            
+            # Create projection layer
+            projection = torch.nn.Sequential(
+                torch.nn.Linear(
+                    self.acoustic_processor.model.config.hidden_size,
+                    bert_dim
+                ),
+                torch.nn.LayerNorm(bert_dim),
+                torch.nn.GELU(),
+                torch.nn.Linear(bert_dim, self.semantic_dim)
+            ).to(self.device)
+            
+            # Initialize first layer with PCA-like projection
+            acoustic_dim = self.acoustic_processor.model.config.hidden_size
+            U, _, _ = torch.linalg.svd(
+                bert_embeddings.weight.float(),
+                full_matrices=False
+            )
+            if acoustic_dim > bert_dim:
+                init_weight = U.T[:bert_dim, :]
+            else:
+                init_weight = U.T[:acoustic_dim, :bert_dim]
+            
+            projection[0].weight.data.copy_(init_weight)
+            
+            return projection
     
     def process_frame(
         self,
@@ -146,8 +171,14 @@ class IntegrationPipeline:
         # Update context
         self._update_context(acoustic_features)
         
-        # Map to semantic space
-        semantic_vector = self._map_to_semantic_space(acoustic_features.features)
+        # Get context embedding
+        context_embedding = self.get_context_embedding()
+        
+        # Map to semantic space with context
+        semantic_vector = self._map_to_semantic_space(
+            acoustic_features.features,
+            context_embedding
+        )
         
         # Update semantic trajectories
         self.momentum_tracker.update_trajectories(
@@ -193,46 +224,51 @@ class IntegrationPipeline:
                             best_decoding = decoding
                             best_trajectory = traj
                 
-                path_word_scores.append(path_scores)
+                if path_scores:  # Only add paths with valid scores
+                    path_word_scores.append(path_scores)
             
-            # Build lattice from paths
-            self.word_lattice.build_from_trajectories(
-                trajectory_paths,
-                path_word_scores
-            )
-            
-            # Get N-best paths from lattice
-            lattice_paths = self.word_lattice.find_best_paths(
-                n_paths=self.n_best
-            )
-            
-            # Convert lattice paths to N-best hypotheses
-            for path in lattice_paths:
-                # Find corresponding trajectory path
-                traj_path = []
-                for node in path.nodes:
-                    traj = next(
-                        t for t in trajectory_paths[0]  # Use first path as reference
-                        if t.id == node.trajectory_id
-                    )
-                    traj_path.append(traj)
+            if path_word_scores:  # Only build lattice if we have valid scores
+                # Build lattice from paths
+                self.word_lattice.build_from_trajectories(
+                    trajectory_paths,
+                    path_word_scores
+                )
                 
-                n_best_results.append(NBestHypothesis(
-                    text=" ".join(node.word for node in path.nodes),
-                    confidence=path.total_score,
-                    word_scores=[
-                        WordScore(
-                            word=node.word,
-                            confidence=node.confidence,
-                            semantic_similarity=path.semantic_score,
-                            language_model_score=path.language_score,
-                            start_time=node.timestamp,
-                            duration=frame_duration
+                # Get N-best paths from lattice
+                lattice_paths = self.word_lattice.find_best_paths(
+                    n_paths=self.n_best
+                )
+                
+                # Convert lattice paths to N-best hypotheses
+                for path in lattice_paths:
+                    # Find corresponding trajectory path
+                    traj_path = []
+                    for node in path.nodes:
+                        traj = next(
+                            (t for t in trajectory_paths[0]  # Use first path as reference
+                            if t.id == node.trajectory_id),
+                            None
                         )
-                        for node in path.nodes
-                    ],
-                    trajectory_path=traj_path
-                ))
+                        if traj is not None:
+                            traj_path.append(traj)
+                    
+                    if traj_path:  # Only add hypotheses with valid trajectories
+                        n_best_results.append(NBestHypothesis(
+                            text=" ".join(node.word for node in path.nodes),
+                            confidence=path.total_score,
+                            word_scores=[
+                                WordScore(
+                                    word=node.word,
+                                    confidence=node.confidence,
+                                    semantic_similarity=path.semantic_score,
+                                    language_model_score=path.language_score,
+                                    start_time=node.timestamp,
+                                    duration=frame_duration
+                                )
+                                for node in path.nodes
+                            ],
+                            trajectory_path=traj_path
+                        ))
         
         # Update time tracking
         self.current_time += frame_duration
@@ -282,12 +318,17 @@ class IntegrationPipeline:
         if len(self.context_buffer) > self.context_window:
             self.context_buffer.pop(0)
     
-    def _map_to_semantic_space(self, features: torch.Tensor) -> np.ndarray:
+    def _map_to_semantic_space(
+        self,
+        features: torch.Tensor,
+        context_embedding: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         """
         Map acoustic features to semantic space
         
         Args:
             features: Acoustic features tensor
+            context_embedding: Optional context embedding
             
         Returns:
             Vector in semantic space
@@ -302,6 +343,12 @@ class IntegrationPipeline:
         # Project to semantic space
         with torch.no_grad():
             semantic_vector = self.semantic_projection(pooled_features)
+            
+            # Add context influence if available
+            if context_embedding is not None:
+                context_tensor = torch.from_numpy(context_embedding).to(self.device)
+                semantic_vector = 0.7 * semantic_vector + 0.3 * context_tensor
+            
             semantic_vector = F.normalize(semantic_vector, p=2, dim=1)
         
         # Convert to numpy and ensure correct shape
@@ -372,4 +419,12 @@ class IntegrationPipeline:
         self.text_decoder.reset_context()
         self.current_time = 0.0
         self.acoustic_processor.reset()
-        # Note: momentum tracker state persists intentionally
+        self.momentum_tracker = MomentumTracker(  # Reset momentum tracker
+            semantic_dim=self.semantic_dim,
+            max_trajectories=self.n_best,
+            beam_width=self.n_best,
+            force_scale=10.0,
+            momentum_decay=0.999,
+            min_confidence=0.1,
+            merge_threshold=0.85
+        )
