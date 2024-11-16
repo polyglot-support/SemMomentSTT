@@ -5,7 +5,7 @@ This script demonstrates the semantic momentum tracking system by visualizing:
 1. Trajectory positions in reduced dimensional space
 2. Confidence scores over time
 3. Force field effects
-4. Word-level confidence analysis
+4. N-best hypotheses with confidence analysis
 """
 
 import numpy as np
@@ -20,7 +20,8 @@ class TrajectoryVisualizer:
         self,
         semantic_dim=768,
         sample_rate=16000,
-        history_length=50
+        history_length=50,
+        n_best=3
     ):
         """
         Initialize the visualizer
@@ -29,11 +30,13 @@ class TrajectoryVisualizer:
             semantic_dim: Dimensionality of semantic space
             sample_rate: Audio sample rate to use
             history_length: Number of past positions to display
+            n_best: Number of hypotheses to display
         """
-        self.stt = SemMomentSTT(semantic_dim=semantic_dim)
+        self.stt = SemMomentSTT(semantic_dim=semantic_dim, n_best=n_best)
         self.pca = PCA(n_components=2)
         self.sample_rate = sample_rate
         self.history_length = history_length
+        self.n_best = n_best
         
         # Setup the plot
         plt.style.use('dark_background')
@@ -46,6 +49,7 @@ class TrajectoryVisualizer:
         self.forces = []
         self.times = []
         self.word_history = []
+        self.n_best_history = []
         self.current_time = 0
         
         # Plot objects
@@ -79,10 +83,10 @@ class TrajectoryVisualizer:
         self.ax_conf.set_ylim(0, 1)
         self.ax_conf.grid(True, alpha=0.3)
         
-        # Word analysis plot (bottom right)
-        self.ax_word = self.fig.add_subplot(224)
-        self.ax_word.set_title('Word-Level Analysis')
-        self.ax_word.axis('off')
+        # N-best analysis plot (bottom right)
+        self.ax_nbest = self.fig.add_subplot(224)
+        self.ax_nbest.set_title('N-Best Hypotheses')
+        self.ax_nbest.axis('off')
     
     def _update_plot(self, frame):
         """Update the visualization"""
@@ -119,12 +123,11 @@ class TrajectoryVisualizer:
                 self.confidences.pop(0)
                 self.times.pop(0)
             
-            # Update word history
-            if result.decoding_result is not None:
-                word_score = result.decoding_result.word_scores[0]
-                self.word_history.append(word_score)
-                if len(self.word_history) > 10:  # Keep last 10 words
-                    self.word_history.pop(0)
+            # Update N-best history
+            if result.n_best:
+                self.n_best_history.append(result.n_best)
+                if len(self.n_best_history) > 10:  # Keep last 10 results
+                    self.n_best_history.pop(0)
             
             # Update trajectory plot
             positions_array = np.array(self.positions)
@@ -187,40 +190,50 @@ class TrajectoryVisualizer:
                 # Plot overall confidence
                 self.ax_conf.plot(self.times, self.confidences, 'g-', alpha=0.8, label='Overall')
                 
-                # Plot word-level confidences if available
-                if self.word_history:
-                    word_times = [w.start_time for w in self.word_history]
-                    word_confs = [w.confidence for w in self.word_history]
-                    self.ax_conf.scatter(word_times, word_confs, c='y', alpha=0.6, label='Words')
+                # Plot N-best confidences
+                if self.n_best_history:
+                    latest_n_best = self.n_best_history[-1]
+                    for i, hyp in enumerate(latest_n_best[:3]):  # Show top 3
+                        self.ax_conf.scatter(
+                            self.times[-1],
+                            hyp.confidence,
+                            c=f'C{i+1}',
+                            alpha=0.6,
+                            label=f'Hyp {i+1}'
+                        )
                 
                 self.ax_conf.legend()
                 
-                # Update word analysis plot
-                self.ax_word.clear()
-                self.ax_word.set_title('Word-Level Analysis')
-                self.ax_word.axis('off')
+                # Update N-best analysis plot
+                self.ax_nbest.clear()
+                self.ax_nbest.set_title('N-Best Hypotheses')
+                self.ax_nbest.axis('off')
                 
-                # Display word history with confidence breakdown
-                text_content = []
-                for i, word_score in enumerate(reversed(self.word_history)):
-                    time_str = f"{word_score.start_time:.1f}s"
-                    conf_str = f"{word_score.confidence*100:.1f}%"
-                    sem_str = f"{word_score.semantic_similarity*100:.1f}%"
-                    lm_str = f"{word_score.language_model_score*100:.1f}%"
+                if self.n_best_history:
+                    latest_n_best = self.n_best_history[-1]
+                    text_content = []
                     
-                    text_content.append(
-                        f"{time_str} | {word_score.word:<10} | "
-                        f"Conf: {conf_str} (Sem: {sem_str}, LM: {lm_str})"
+                    for i, hyp in enumerate(latest_n_best[:self.n_best]):
+                        text_content.append(f"Hypothesis {i+1}:")
+                        text_content.append(f"Text: {hyp.text}")
+                        text_content.append(f"Confidence: {hyp.confidence*100:.1f}%")
+                        text_content.append("Word Details:")
+                        for word_score in hyp.word_scores:
+                            text_content.append(
+                                f"  {word_score.word:<10} "
+                                f"(Sem: {word_score.semantic_similarity*100:4.1f}%, "
+                                f"LM: {word_score.language_model_score*100:4.1f}%)"
+                            )
+                        text_content.append("")
+                    
+                    self.ax_nbest.text(
+                        0.05, 0.95,
+                        "\n".join(text_content),
+                        fontsize=10,
+                        family='monospace',
+                        verticalalignment='top',
+                        transform=self.ax_nbest.transAxes
                     )
-                
-                self.ax_word.text(
-                    0.05, 0.95,
-                    "\n".join(text_content),
-                    fontsize=10,
-                    family='monospace',
-                    verticalalignment='top',
-                    transform=self.ax_word.transAxes
-                )
             
             self.current_time += 1
     
@@ -250,7 +263,10 @@ def main():
     
     for rate in sample_rates:
         print(f"\nVisualizing with {rate}Hz audio...")
-        visualizer = TrajectoryVisualizer(sample_rate=rate)
+        visualizer = TrajectoryVisualizer(
+            sample_rate=rate,
+            n_best=3
+        )
         try:
             visualizer.run()
         except KeyboardInterrupt:

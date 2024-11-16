@@ -2,9 +2,9 @@
 Basic usage examples for SemMomentSTT
 
 This script demonstrates the core functionality of the SemMomentSTT system:
-1. File transcription with word-level confidence scores
-2. Real-time microphone transcription with detailed word timing
-3. Custom audio streaming with word-level analysis
+1. File transcription with N-best hypotheses
+2. Real-time microphone transcription with alternatives
+3. Custom audio streaming with multiple hypotheses
 """
 
 import numpy as np
@@ -27,11 +27,22 @@ def format_word_score(word_score) -> str:
         f"LM: {word_score.language_model_score*100:4.1f}%)"
     )
 
+def format_hypothesis(hyp, prefix="") -> str:
+    """Format N-best hypothesis information"""
+    lines = [
+        f"{prefix}Text: {hyp.text}",
+        f"{prefix}Confidence: {hyp.confidence*100:.1f}%",
+        f"{prefix}Word Details:"
+    ]
+    for word_score in hyp.word_scores:
+        lines.append(f"{prefix}  {format_word_score(word_score)}")
+    return "\n".join(lines)
+
 def example_file_transcription():
-    """Demonstrate file transcription with word-level analysis"""
+    """Demonstrate file transcription with N-best analysis"""
     print("\n=== File Transcription Example ===")
     
-    stt = SemMomentSTT()
+    stt = SemMomentSTT(n_best=3)  # Keep top 3 hypotheses
     
     # Example with different audio formats and sample rates
     audio_files = [
@@ -51,39 +62,35 @@ def example_file_transcription():
         
         print(f"\nProcessing: {audio_path} ({sample_rate}Hz)")
         try:
-            # Get detailed transcription with word scores
+            # Get detailed transcription with N-best hypotheses
             results = stt.transcribe_file(
                 audio_path,
-                return_word_scores=True
+                return_word_scores=True,
+                return_n_best=True
             )
             
             print("\nDetailed transcription:")
             for result in results:
-                print(f"\n[{format_time(result.timestamp)}] "
-                      f"Overall confidence: {result.confidence*100:.1f}%")
+                print(f"\n[{format_time(result.timestamp)}]")
                 
-                for word_score in result.word_scores:
-                    print(f"  {format_word_score(word_score)}")
+                # Show N-best hypotheses
+                print("\nN-best hypotheses:")
+                for i, hyp in enumerate(result.n_best):
+                    print(f"\nHypothesis {i+1}:")
+                    print(format_hypothesis(hyp, "  "))
             
             # Get simple transcription
             text = stt.transcribe_file(audio_path)
-            print(f"\nFull text: {text}")
-            
-            # Get word history for the last second
-            recent_words = stt.get_word_history(time_window=1.0)
-            print("\nRecent word history (last 1 second):")
-            for word_score in recent_words:
-                print(f"  [{format_time(word_score.start_time)}] "
-                      f"{format_word_score(word_score)}")
+            print(f"\nBest hypothesis text: {text}")
             
         except Exception as e:
             print(f"Error processing {audio_path}: {str(e)}")
 
 def example_microphone_input():
-    """Demonstrate real-time microphone transcription with word analysis"""
+    """Demonstrate real-time microphone transcription with alternatives"""
     print("\n=== Microphone Transcription Example ===")
     
-    stt = SemMomentSTT()
+    stt = SemMomentSTT(n_best=3)
     
     # Show available devices
     stt.list_audio_devices()
@@ -101,12 +108,17 @@ def example_microphone_input():
         print("Speak into your microphone (Ctrl+C to stop)")
         
         try:
-            for result in stt.transcribe_microphone(**config):
-                print(f"\n[{format_time(result.timestamp)}] "
-                      f"Overall confidence: {result.confidence*100:.1f}%")
+            for result in stt.transcribe_microphone(
+                return_n_best=True,
+                **config
+            ):
+                print(f"\n[{format_time(result.timestamp)}]")
                 
-                for word_score in result.word_scores:
-                    print(f"  {format_word_score(word_score)}")
+                # Show N-best hypotheses
+                print("\nN-best hypotheses:")
+                for i, hyp in enumerate(result.n_best):
+                    print(f"\nHypothesis {i+1}:")
+                    print(format_hypothesis(hyp, "  "))
         except KeyboardInterrupt:
             print("\nStopped microphone transcription")
         except Exception as e:
@@ -115,7 +127,7 @@ def example_microphone_input():
             stt.reset()  # Reset system state between configurations
 
 def example_custom_stream():
-    """Demonstrate custom audio streaming with word-level analysis"""
+    """Demonstrate custom audio streaming with multiple hypotheses"""
     print("\n=== Custom Stream Example ===")
     
     def create_audio_stream(sample_rate, duration=5.0, chunk_duration=0.5):
@@ -128,7 +140,7 @@ def example_custom_stream():
             chunk = np.random.randn(chunk_size).astype(np.float32) * 0.1
             yield chunk
     
-    stt = SemMomentSTT()
+    stt = SemMomentSTT(n_best=3)
     
     # Test with different sample rates
     sample_rates = [8000, 16000, 44100, 48000]
@@ -141,21 +153,27 @@ def example_custom_stream():
             for result in stt.transcribe_stream(
                 stream,
                 stream_sample_rate=rate,
-                chunk_duration=0.5
+                chunk_duration=0.5,
+                return_n_best=True
             ):
-                print(f"\n[{format_time(result.timestamp)}] "
-                      f"Overall confidence: {result.confidence*100:.1f}%")
+                print(f"\n[{format_time(result.timestamp)}]")
                 
-                for word_score in result.word_scores:
-                    print(f"  {format_word_score(word_score)}")
+                # Show N-best hypotheses with analysis
+                print("\nN-best hypotheses:")
+                for i, hyp in enumerate(result.n_best):
+                    print(f"\nHypothesis {i+1}:")
+                    print(format_hypothesis(hyp, "  "))
                     
-                # Show semantic similarity vs language model contribution
-                word = word_score.word
-                sem_conf = word_score.semantic_similarity
-                lm_conf = word_score.language_model_score
-                print(f"  Analysis for '{word}':")
-                print(f"    Semantic: {'='*int(sem_conf*40):40s} {sem_conf*100:4.1f}%")
-                print(f"    Language: {'='*int(lm_conf*40):40s} {lm_conf*100:4.1f}%")
+                    # Show confidence distribution
+                    print("\n  Confidence Analysis:")
+                    print("  " + "=" * 50)
+                    print(f"  Overall: {'='*int(hyp.confidence*40):40s} {hyp.confidence*100:4.1f}%")
+                    
+                    # Show word-level analysis
+                    for word_score in hyp.word_scores:
+                        print(f"\n  {word_score.word}:")
+                        print(f"    Semantic: {'='*int(word_score.semantic_similarity*40):40s} {word_score.semantic_similarity*100:4.1f}%")
+                        print(f"    Language: {'='*int(word_score.language_model_score*40):40s} {word_score.language_model_score*100:4.1f}%")
                 
         except Exception as e:
             print(f"Error processing {rate}Hz stream: {str(e)}")
