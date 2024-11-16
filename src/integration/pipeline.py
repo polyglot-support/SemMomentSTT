@@ -6,7 +6,7 @@ This module handles the integration between acoustic and semantic components:
 - Context integration
 - Pipeline coordination
 - Text decoding with word-level confidence
-- N-best list generation
+- N-best list and lattice generation
 """
 
 from typing import Optional, List, Generator, Tuple, NamedTuple
@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from ..acoustic.processor import AcousticProcessor, AcousticFeatures
 from ..semantic.momentum_tracker import MomentumTracker, SemanticTrajectory
+from ..semantic.lattice import WordLattice, LatticePath
 from ..decoder.text_decoder import TextDecoder, WordScore, DecodingResult
 
 class NBestHypothesis(NamedTuple):
@@ -30,6 +31,7 @@ class ProcessingResult(NamedTuple):
     trajectory: Optional[SemanticTrajectory]
     decoding_result: Optional[DecodingResult]
     n_best: List[NBestHypothesis]
+    lattice_paths: List[LatticePath]
     features: Optional[AcousticFeatures] = None
 
 class IntegrationPipeline:
@@ -76,6 +78,8 @@ class IntegrationPipeline:
             model_name=language_model,
             device=self.device
         )
+        
+        self.word_lattice = WordLattice()
         
         # Context buffer
         self.context_buffer: List[AcousticFeatures] = []
@@ -132,43 +136,96 @@ class IntegrationPipeline:
             confidence=acoustic_features.confidence
         )
         
-        # Get N-best trajectory paths
-        paths = self.momentum_tracker.get_trajectory_paths()
+        # Get trajectory paths
+        trajectory_paths = self.momentum_tracker.get_trajectory_paths()
         
-        # Process N-best hypotheses
+        # Process paths and build lattice
         n_best_results = []
+        lattice_paths = []
         best_decoding = None
         best_trajectory = None
         
-        for path in paths[:self.n_best]:
-            if not path:
-                continue
+        if trajectory_paths:
+            # Collect word scores for each path
+            path_word_scores = []
+            
+            for path in trajectory_paths:
+                path_scores = []
+                for traj in path:
+                    # Get word scores for trajectory
+                    decoding = self.text_decoder.decode_trajectory(
+                        traj,
+                        timestamp=self.current_time,
+                        duration=frame_duration
+                    )
+                    
+                    if decoding is not None:
+                        word_score = decoding.word_scores[0]
+                        path_scores.append((
+                            decoding.text,
+                            word_score.confidence,
+                            word_score.language_model_score,
+                            word_score.semantic_similarity
+                        ))
+                        
+                        # Keep track of best result
+                        if (best_decoding is None or 
+                            decoding.confidence > best_decoding.confidence):
+                            best_decoding = decoding
+                            best_trajectory = traj
                 
-            current_traj = path[-1]
-            decoding_result = self.text_decoder.decode_trajectory(
-                current_traj,
-                timestamp=self.current_time,
-                duration=frame_duration
+                path_word_scores.append(path_scores)
+            
+            # Build lattice from paths
+            self.word_lattice.build_from_trajectories(
+                trajectory_paths,
+                path_word_scores
             )
             
-            if decoding_result is not None:
-                n_best_results.append(NBestHypothesis(
-                    text=decoding_result.text,
-                    confidence=decoding_result.confidence,
-                    word_scores=decoding_result.word_scores,
-                    trajectory_path=path
-                ))
+            # Get N-best paths from lattice
+            lattice_paths = self.word_lattice.find_best_paths(
+                n_paths=self.n_best
+            )
+            
+            # Convert lattice paths to N-best hypotheses
+            for path in lattice_paths:
+                # Find corresponding trajectory path
+                traj_path = []
+                for node in path.nodes:
+                    traj = next(
+                        t for t in trajectory_paths[0]  # Use first path as reference
+                        if t.id == node.trajectory_id
+                    )
+                    traj_path.append(traj)
                 
-                # Keep track of best result
-                if best_decoding is None or decoding_result.confidence > best_decoding.confidence:
-                    best_decoding = decoding_result
-                    best_trajectory = current_traj
+                n_best_results.append(NBestHypothesis(
+                    text=" ".join(node.word for node in path.nodes),
+                    confidence=path.total_score,
+                    word_scores=[
+                        WordScore(
+                            word=node.word,
+                            confidence=node.confidence,
+                            semantic_similarity=path.semantic_score,
+                            language_model_score=path.language_score,
+                            start_time=node.timestamp,
+                            duration=frame_duration
+                        )
+                        for node in path.nodes
+                    ],
+                    trajectory_path=traj_path
+                ))
         
         # Update time tracking
         self.current_time += frame_duration
         
         features = acoustic_features if return_features else None
-        return ProcessingResult(best_trajectory, best_decoding, n_best_results, features)
+        return ProcessingResult(
+            best_trajectory,
+            best_decoding,
+            n_best_results,
+            lattice_paths,
+            features
+        )
     
     def process_stream(
         self,
@@ -276,6 +333,15 @@ class IntegrationPipeline:
             List of word scores with timing information
         """
         return self.text_decoder.get_word_history(time_window)
+    
+    def get_lattice_dot(self) -> str:
+        """
+        Get DOT representation of current lattice
+        
+        Returns:
+            DOT format string for visualization
+        """
+        return self.word_lattice.to_dot()
     
     def reset(self):
         """Reset the pipeline state"""

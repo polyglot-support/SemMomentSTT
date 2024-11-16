@@ -10,6 +10,7 @@ from src.integration.pipeline import (
 )
 from src.semantic.momentum_tracker import SemanticTrajectory
 from src.decoder.text_decoder import WordScore, DecodingResult
+from src.semantic.lattice import LatticePath
 
 @pytest.fixture
 def pipeline():
@@ -17,7 +18,7 @@ def pipeline():
     return IntegrationPipeline(
         semantic_dim=768,
         context_window=5,
-        n_best=3  # Set N-best size for testing
+        n_best=3
     )
 
 def test_pipeline_initialization(pipeline):
@@ -30,6 +31,7 @@ def test_pipeline_initialization(pipeline):
     assert len(pipeline.context_buffer) == 0
     assert isinstance(pipeline.semantic_projection, torch.nn.Linear)
     assert hasattr(pipeline, 'text_decoder')
+    assert hasattr(pipeline, 'word_lattice')
     assert pipeline.current_time == 0.0
 
 def test_process_frame(pipeline):
@@ -77,6 +79,14 @@ def test_process_frame(pipeline):
         assert isinstance(hyp.word_scores, list)
         assert isinstance(hyp.trajectory_path, list)
         assert all(isinstance(t, SemanticTrajectory) for t in hyp.trajectory_path)
+    
+    # Check lattice paths
+    assert isinstance(result.lattice_paths, list)
+    for path in result.lattice_paths:
+        assert isinstance(path, LatticePath)
+        assert path.total_score > 0
+        assert len(path.nodes) > 0
+        assert len(path.edges) == len(path.nodes) - 1
 
 def test_n_best_ranking(pipeline):
     """Test ranking of N-best hypotheses"""
@@ -93,6 +103,19 @@ def test_n_best_ranking(pipeline):
         if result.decoding_result is not None:
             assert best_hyp.text == result.decoding_result.text
             assert best_hyp.confidence == result.decoding_result.confidence
+
+def test_lattice_generation(pipeline):
+    """Test lattice generation and DOT output"""
+    # Process multiple frames
+    for _ in range(3):
+        audio_frame = np.random.randn(16000).astype(np.float32)
+        pipeline.process_frame(audio_frame)
+    
+    # Get lattice visualization
+    dot = pipeline.get_lattice_dot()
+    assert isinstance(dot, str)
+    assert dot.startswith("digraph {")
+    assert dot.endswith("}")
 
 def test_time_tracking(pipeline):
     """Test time tracking across frames"""
@@ -154,6 +177,7 @@ def test_process_frame_with_resampling(pipeline):
     )
     assert isinstance(result_44k, ProcessingResult)
     assert isinstance(result_44k.n_best, list)
+    assert isinstance(result_44k.lattice_paths, list)
     
     # Test with 8kHz audio
     audio_8k = np.random.randn(8000).astype(np.float32)
@@ -164,6 +188,7 @@ def test_process_frame_with_resampling(pipeline):
     )
     assert isinstance(result_8k, ProcessingResult)
     assert isinstance(result_8k.n_best, list)
+    assert isinstance(result_8k.lattice_paths, list)
 
 def test_context_management(pipeline):
     """Test context buffer management"""
@@ -210,7 +235,9 @@ def test_stream_processing(pipeline):
     for result in results:
         assert isinstance(result, ProcessingResult)
         assert isinstance(result.n_best, list)
+        assert isinstance(result.lattice_paths, list)
         assert len(result.n_best) <= pipeline.n_best
+        assert len(result.lattice_paths) <= pipeline.n_best
 
 @pytest.mark.parametrize("semantic_dim", [512, 768, 1024])
 def test_different_dimensions(semantic_dim):
@@ -287,3 +314,23 @@ def test_trajectory_path_consistency(pipeline):
             
             # Last trajectory in path should match confidence
             assert abs(path[-1].confidence - hyp.confidence) < 1e-6
+
+def test_lattice_path_consistency(pipeline):
+    """Test consistency between N-best and lattice paths"""
+    audio_frame = np.random.randn(16000).astype(np.float32)
+    result = pipeline.process_frame(audio_frame)
+    
+    if result.n_best and result.lattice_paths:
+        # N-best and lattice paths should have same number of results
+        assert len(result.n_best) == len(result.lattice_paths)
+        
+        # Best hypothesis should correspond to best lattice path
+        best_hyp = result.n_best[0]
+        best_path = result.lattice_paths[0]
+        
+        # Text should match
+        path_text = " ".join(node.word for node in best_path.nodes)
+        assert best_hyp.text == path_text
+        
+        # Scores should match
+        assert abs(best_hyp.confidence - best_path.total_score) < 1e-6
